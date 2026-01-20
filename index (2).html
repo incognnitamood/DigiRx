@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DigiRx | Digital Prescription System</title>
+
+    <link rel="stylesheet" href="styles (1).css" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+
+    <!-- NAVBAR -->
+    <header class="navbar">
+        <div class="nav-content">
+            <div class="brand">
+                <div class="brand-icon">+</div>
+                <h1>DigiRx</h1>
+            </div>
+            <span class="nav-muted">Voice-assisted prescriptions</span>
+        </div>
+    </header>
+
+    <!-- MAIN -->
+    <main class="container">
+        <section class="login-card">
+
+            <header class="card-header">
+                <h2>Digital Prescription System</h2>
+                <p class="subtitle">
+                    Secure, voice-assisted prescription platform for rural healthcare
+                </p>
+            </header>
+
+            <div class="role-grid">
+
+                <!-- PATIENT -->
+                <div class="role-card">
+                    <h3>Patient Login</h3>
+                    <p class="info-text">
+                        Access your prescriptions using your Patient ID.
+                    </p>
+
+                    <input
+                        type="text"
+                        id="patientIdInput"
+                        placeholder="Patient ID (e.g. PID12345)"
+                        class="input-field"
+                    />
+
+                    <button class="btn-primary full-width" onclick="loginAsPatient()">
+                        Continue as Patient
+                    </button>
+                </div>
+
+                <!-- DOCTOR -->
+                <div class="role-card accent">
+                    <h3>Doctor Login</h3>
+                    <p class="info-text">
+                        Authorised access for registered medical professionals.
+                    </p>
+
+                    <button class="btn-primary full-width" onclick="loginAsDoctor()">
+                        Continue as Doctor
+                    </button>
+                </div>
+
+            </div>
+        </section>
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="site-footer">
+        <p>© <span id="year"></span> DigiRx — Designed for better rural healthcare</p>
+    </footer>
+
+    <script>
+        document.getElementById("year").textContent = new Date().getFullYear();
+    </script>
+    <script src="app (1).js"></script>
+
+</body>
+</html>

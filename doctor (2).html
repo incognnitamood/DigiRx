@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DigiRx | Doctor Dashboard</title>
+
+    <link rel="stylesheet" href="styles (1).css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+</head>
+
+<body>
+
+    <!-- NAVBAR -->
+    <header class="navbar">
+        <div class="nav-content">
+            <div class="brand">
+                <div class="brand-icon">+</div>
+                <h1>DigiRx</h1>
+            </div>
+            <span class="nav-muted">Doctor Portal</span>
+        </div>
+        <button class="btn-secondary" onclick="logout()">Logout</button>
+    </header>
+
+    <!-- MAIN -->
+    <main class="container dashboard">
+
+        <!-- PATIENT LOOKUP -->
+        <section class="dashboard-card">
+            <h2>Patient Lookup</h2>
+            <p class="info-text">Enter Patient ID to load medical history and create prescriptions</p>
+
+            <div class="form-group">
+                <input
+                    type="text"
+                    id="patientIdInput"
+                    placeholder="Enter Patient ID (e.g. PID12345)"
+                    class="input-field"
+                >
+                <button class="btn-primary full-width" onclick="loadPatient()">
+                    Load Patient Records
+                </button>
+            </div>
+        </section>
+
+        <!-- PATIENT INFORMATION (Hidden until patient loaded) -->
+        <section id="patientInfoSection" class="section hidden">
+            <div class="dashboard-card">
+                <h2>Patient Information</h2>
+                <div class="patient-id-badge">
+                    Patient ID: <span id="currentPatientId" class="id-highlight">-</span>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Patient Name</label>
+                        <input type="text" id="patientName" class="input-field" placeholder="Enter name">
+                    </div>
+                    <div class="form-group">
+                        <label>Age</label>
+                        <input type="text" id="patientAge" class="input-field" placeholder="Age">
+                    </div>
+                    <div class="form-group">
+                        <label>Gender</label>
+                        <select id="patientGender" class="input-field">
+                            <option value="">Select</option>
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button class="btn-secondary" onclick="savePatientDemographics()">
+                    Save Demographics
+                </button>
+
+                <!-- Medical History Disclaimers -->
+                <div class="section-divider">
+                    <h3>Medical History & Contraindications</h3>
+                    <p class="info-text">Automatically extracted from patient's uploaded medical records</p>
+                </div>
+                <div id="patientDisclaimers" class="disclaimers-container">
+                    <p class="empty-state">No medical conditions detected</p>
+                </div>
+
+                <!-- Uploaded Reports -->
+                <div class="section-divider">
+                    <h3>Uploaded Medical Reports</h3>
+                </div>
+                <div id="patientReports">
+                    <p class="empty-state">No reports uploaded</p>
+                </div>
+
+                <!-- Image Upload Section -->
+                <div class="section-divider">
+                    <h3>📁 Upload Patient Images</h3>
+                    <p class="info-text">Upload medical images like X-rays, scans, photos of injuries, etc.</p>
+                </div>
+                <div class="form-group">
+                    <input type="file" id="imageUpload" accept="image/*" multiple onchange="handleImageUpload(event)" style="display: none;">
+                    <button class="btn-secondary" onclick="document.getElementById('imageUpload').click()">
+                        📷 Upload Medical Images
+                    </button>
+                </div>
+                <div id="imageGallery">
+                    <p class="empty-state">No images uploaded for this patient</p>
+                </div>
+
+                <!-- Patient's Prescription History -->
+                <div class="section-divider">
+                    <h3>Patient's Prescription History</h3>
+                </div>
+                <div id="patientPrescriptionHistory">
+                    <p class="empty-state">No previous prescriptions</p>
+                </div>
+            </div>
+        </section>
+
+
+        <!-- PRESCRIPTION SECTION (Hidden until patient loaded) -->
+        <section id="prescriptionSection" class="section hidden">
+            
+         
+            <!-- Voice Input for Medicines -->
+            <div class="dashboard-card voice-card">
+                <h2>🎤 Voice-Assisted Prescription</h2>
+                <p class="info-text">Click the microphone to start dictating prescription details</p>
+                
+                <div class="form-group">
+                    <label>Prescription Input</label>
+                    <input type="text" id="prescriptionInput" class="input-field" placeholder="Speak your prescription details here">
+                </div>
+                
+                <button id="voiceBtn" class="btn-voice" onclick="toggleVoiceInput()">
+                    🎤 Start Voice Input
+                </button>
+                <div id="voiceStatus" class="voice-status"></div>
+                
+                <div class="voice-help">
+                    <strong>Voice Commands Help:</strong>
+                    <ul>
+                        <li>Say medicine names like "Paracetamol 500mg twice daily for 5 days after food"</li>
+                        <li>Say "next medicine" to add another prescription</li>
+                        <li>Say "stop" or "stop recording" when done</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Medicines List -->
+            <div class="dashboard-card">
+                <div class="medicines-header">
+                    <h2>℞ Prescription Medicines</h2>
+                    <button class="btn-secondary" onclick="addMedicineField()">+ Add Medicine</button>
+                </div>
+                
+                <div id="medicinesList" class="medicines-list">
+                    <!-- Medicine cards will be dynamically added here -->
+                </div>
+            </div>
+
+            <!-- Drug Interaction Warnings -->
+            <div id="warningSection" class="dashboard-card warning-card hidden">
+                <h2>⚠️ Drug Safety Warnings</h2>
+                <p class="warning-intro">The following medicines have contraindications with the patient's medical conditions:</p>
+                
+                <div id="warningMessages" class="warnings-container">
+                    <!-- Warnings will be populated here -->
+                </div>
+
+                <div class="acknowledgment-section">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="acknowledgeWarning">
+                        <span>I acknowledge these warnings and have considered alternative medications or adjusted dosages appropriately</span>
+                    </label>
+                    
+                    <div class="form-group">
+                        <label>Override Reason / Clinical Notes (Optional)</label>
+                        <textarea id="overrideReason" class="input-field textarea" rows="3" 
+                            placeholder="Document your clinical reasoning for proceeding despite warnings..."></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Instructions & Advice -->
+            <div class="dashboard-card">
+                <h2>Instructions & Follow-up</h2>
+                
+                <div class="form-group">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <label>Dietary Advice</label>
+                        <button class="btn-secondary" onclick="startFieldVoiceInput('dietaryAdvice')" style="padding: 6px 12px;">
+                            🎤 Voice
+                        </button>
+                    </div>
+                    <div id="dietaryAdviceStatus" class="voice-status" style="margin-bottom: 8px;"></div>
+                    <textarea id="dietaryAdvice" class="input-field textarea" rows="2" 
+                        placeholder="e.g., Drink plenty of fluids, avoid cold beverages"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <label>General Instructions</label>
+                        <button class="btn-secondary" onclick="startFieldVoiceInput('generalInstructions')" style="padding: 6px 12px;">
+                            🎤 Voice
+                        </button>
+                    </div>
+                    <div id="generalInstructionsStatus" class="voice-status" style="margin-bottom: 8px;"></div>
+                    <textarea id="generalInstructions" class="input-field textarea" rows="2" 
+                        placeholder="e.g., Take adequate rest, avoid strenuous activities"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <label>Follow-up</label>
+                        <button class="btn-secondary" onclick="startFieldVoiceInput('followUp')" style="padding: 6px 12px;">
+                            🎤 Voice
+                        </button>
+                    </div>
+                    <div id="followUpStatus" class="voice-status" style="margin-bottom: 8px;"></div>
+                    <input type="text" id="followUp" class="input-field" 
+                        placeholder="e.g., Follow up after 3 days if symptoms persist">
+                </div>
+            </div>
+
+            <!-- Save Prescription -->
+            <div class="dashboard-card action-card">
+                <button class="btn-primary btn-large full-width" onclick="savePrescription()">
+                    💾 Save & Issue Prescription
+                </button>
+                <button class="btn-secondary full-width" onclick="clearPrescription()" style="margin-top: 12px;">
+                    Clear Form
+                </button>
+
+                <div id="successMessage" class="success-message hidden">
+                    ✓ Prescription saved successfully! Patient can now view it in their portal.
+                </div>
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="site-footer">
+        <p>© <span id="year"></span> DigiRx — Doctor Portal</p>
+    </footer>
+
+    <script>
+        document.getElementById("year").textContent = new Date().getFullYear();
+    </script>
+    <script src="app (1).js"></script>
+    <script>
+        // Initialize doctor dashboard on page load
+        window.onload = function() {
+            initializeDoctorDashboard();
+        };
+    </script>
+
+</body>
+</html>

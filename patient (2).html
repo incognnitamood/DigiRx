@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Patient Dashboard - Digital Prescription System</title>
+    <link rel="stylesheet" href="styles (1).css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-content">
+            <div>
+                <h1>DigiRx</h1>
+                <div class="nav-muted">Patient Portal</div>
+            </div>
+            <div>
+                <button class="btn-secondary" onclick="logout()">Logout</button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="dashboard-card">
+            <h2>Patient Dashboard</h2>
+            
+            <div class="patient-id-section">
+                <h3>Your Patient ID</h3>
+                <div class="id-display" id="patientIdDisplay">Loading...</div>
+                <p class="info-text">Share this ID with your doctor for prescription access</p>
+            </div>
+
+            <div class="section">
+                <h3>Medical History</h3>
+                <p class="info-text">Upload your medical reports, lab results, previous prescriptions, or diagnostic tests</p>
+                <p class="info-text" style="font-weight: 500; color: var(--color-primary);">The system will automatically analyze your files to extract relevant medical conditions</p>
+                
+                <div class="upload-section">
+                    <input type="file" id="fileUpload" accept=".pdf,.jpg,.jpeg,.png" multiple>
+                    <button class="btn-primary" onclick="uploadReports()">Upload Reports</button>
+                </div>
+
+                <div id="uploadedFiles" class="uploaded-files"></div>
+            </div>
+
+            <div class="section">
+                <h3>Extracted Medical Conditions</h3>
+                <p class="info-text">Conditions automatically identified from your uploaded medical history</p>
+                <div id="extractedConditions" class="condition-flags">
+                    <span style="color: var(--color-text-light); font-style: italic;">Upload medical files to extract conditions</span>
+                </div>
+            </div>
+
+            <div class="section">
+                <h3>Uploaded Medical Images</h3>
+                <p class="info-text">Images uploaded by your doctor for your medical records</p>
+                <div id="imageGallery" class="uploaded-files">
+                    <p class="empty-state">No images uploaded by your doctor yet</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <h3>Your Prescriptions</h3>
+                <div id="prescriptionsList" class="prescriptions-list">
+                    <p class="empty-state">No prescriptions yet. Visit your doctor to get started.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="site-footer">
+        <div class="container">
+            <p class="footer-note">© <span id="year-patient"></span> DigiRx — Built for better rural healthcare</p>
+        </div>
+    </footer>
+
+    <script>
+        document.getElementById('year-patient').textContent = new Date().getFullYear();
+    </script>
+    <script src="app (1).js"></script>
+    <script>
+        // Initialize patient dashboard
+        window.onload = function() {
+            initializePatientDashboard();
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Clinical Report Parser</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #f4f7f6; padding: 20px; color: #333; }
+        .container { max-width: 1000px; margin: auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        .grid { display: grid; grid-template-columns: 1fr 1.2fr; gap: 20px; margin-top: 20px; }
+        #status { color: #3498db; font-weight: bold; margin: 15px 0; padding: 10px; background: #e8f4fd; border-radius: 5px; text-align: center;}
+        
+        /* Summary Box */
+        .summary-box { background: #e8f5e9; border-left: 5px solid #2e7d32; padding: 15px; margin-bottom: 20px; }
+        .summary-box h3 { margin-top: 0; color: #1b5e20; }
+        
+        table { width: 100%; border-collapse: collapse; background: white; }
+        th { background: #f8f9fa; padding: 12px; border-bottom: 2px solid #dee2e6; text-align: left; }
+        td { padding: 12px; border-bottom: 1px solid #eee; }
+        .correction { font-size: 0.75rem; color: #d35400; font-weight: bold; display: block; }
+        .danger-row { background: #fff5f5; border-left: 4px solid #e74c3c; }
+        
+        #preview { width: 100%; border: 1px solid #ddd; border-radius: 8px; }
+        canvas { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Clinical Analyzer <small style="font-size: 0.5em; color: #666;">v2.1 Accuracy Update</small></h2>
+    
+    <input type="file" id="imageInput" accept="image/*">
+    <div id="status">Upload a report (Blood test, Pregnancy, or Prescription)</div>
+
+    <div id="summaryResult" class="summary-box" style="display:none;">
+        <h3>AI Narrative Summary</h3>
+        <p id="summaryText"></p>
+    </div>
+
+    <div class="grid">
+        <div>
+            <h3>Source Document</h3>
+            <img id="preview" src="" alt="Waiting for upload...">
+        </div>
+        <div>
+            <h3>Structured Data (Doctor's View)</h3>
+            <table>
+                <thead>
+                    <tr><th>Marker</th><th>Value</th><th>Clinical Note</th></tr>
+                </thead>
+                <tbody id="tableBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+const DICTIONARY = { "rvc": "RBC", "hgb": "HGB", "wbc": "WBC", "hct": "HCT", "glu": "Glucose" };
+
+const imageInput = document.getElementById('imageInput');
+const tableBody = document.getElementById('tableBody');
+const summaryResult = document.getElementById('summaryResult');
+const summaryText = document.getElementById('summaryText');
+
+imageInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Show Image Preview
+    const img = new Image();
+    img.src = URL.createObjectURL(file);
+    img.onload = async () => {
+        document.getElementById('preview').src = img.src;
+        
+        // 1. IMAGE PRE-PROCESSING (Crucial for decimals)
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.filter = 'grayscale(100%) contrast(250%) brightness(110%)';
+        ctx.drawImage(img, 0, 0);
+        
+        document.getElementById('status').innerText = "Cleaning Image & Extracting Text...";
+        
+        // 2. OCR STAGE
+        const processedImage = canvas.toDataURL('image/jpeg', 1.0);
+        const result = await Tesseract.recognize(processedImage, 'eng');
+        analyzeReport(result.data.text);
+    };
+});
+
+function analyzeReport(text) {
+    const lines = text.split('\n');
+    let extractedData = [];
+    let reportType = "General Report";
+    
+    tableBody.innerHTML = "";
+    summaryResult.style.display = "block";
+
+    // Detect Report Type
+    if (text.toLowerCase().includes("hcg")) reportType = "Pregnancy (hCG) Report";
+    if (text.toLowerCase().includes("hemoglobin")) reportType = "Complete Blood Count (CBC)";
+
+    lines.forEach(line => {
+        let cleanLine = line.toLowerCase().trim();
+        if (cleanLine.length < 3) return;
+
+        // Apply Autocorrect (rvc -> rbc)
+        Object.keys(DICTIONARY).forEach(key => {
+            if (cleanLine.includes(key)) cleanLine = cleanLine.replace(key, DICTIONARY[key]);
+        });
+
+        // Regex: Look for a Label and a Number (handling decimals)
+        const match = cleanLine.match(/([a-z\s]+)\s+([\d\.]+)/i);
+        
+        if (match) {
+            let label = match[1].toUpperCase().trim();
+            let value = match[2];
+            let note = "Normal Detection";
+
+            // DECIMAL FIX: If RBC is 41, it should be 4.1
+            if (label.includes("RBC") && parseFloat(value) > 10) {
+                value = (parseFloat(value) / 10).toFixed(1);
+                note = `<span class="correction">Auto-corrected decimal: ${match[2]} → ${value}</span>`;
+            }
+
+            extractedData.push({ label, value });
+            tableBody.innerHTML += `<tr>
+                <td>${label}</td>
+                <td><strong>${value}</strong></td>
+                <td>${note}</td>
+            </tr>`;
+        }
+    });
+
+    // 3. GENERATE THE NARRATIVE SUMMARY
+    if (extractedData.length > 0) {
+        summaryText.innerHTML = `Identified as a <strong>${reportType}</strong>. <br> 
+        Extracted ${extractedData.length} clinical markers. Primary focus found on <strong>${extractedData[0].label}</strong> 
+        with a value of <strong>${extractedData[0].value}</strong>.`;
+    } else {
+        summaryText.innerText = "Text detected, but no specific clinical markers (Test Name + Value) could be structured. Please review source image.";
+    }
+    
+    document.getElementById('status').innerText = "Analysis Finished.";
+}
+</script>
+</body>
+</html>

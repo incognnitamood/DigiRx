@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Upload Feature Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 { 
+            color: #2c3e50; 
+            text-align: center; 
+            margin-bottom: 30px;
+        }
+        .feature-box {
+            border: 2px solid #3498db;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            background-color: #f8f9fa;
+        }
+        .feature-title {
+            color: #2980b9;
+            margin-top: 0;
+        }
+        .highlight {
+            background-color: #e8f4fd;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .steps {
+            background-color: #f9f9f9;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 15px 0;
+        }
+        .step {
+            margin: 10px 0;
+            padding: 8px;
+            background-color: white;
+            border-left: 4px solid #3498db;
+        }
+        .success { color: #27ae60; font-weight: bold; }
+        .warning { color: #f39c12; font-weight: bold; }
+        .info { color: #3498db; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📷 Image Upload & View Feature</h1>
+        
+        <div class="feature-box">
+            <h3 class="feature-title">📋 Feature Overview</h3>
+            <p>The medical prescription system now includes an <span class="highlight">image upload and viewing</span> feature that allows doctors to upload medical images for patients and enables both doctors and patients to view and download these images.</p>
+        </div>
+        
+        <div class="feature-box">
+            <h3 class="feature-title">🔧 How It Works</h3>
+            <div class="steps">
+                <div class="step"><span class="info">Step 1:</span> Doctor logs into the system and loads a patient</div>
+                <div class="step"><span class="info">Step 2:</span> Doctor sees the "📁 Upload Patient Images" section</div>
+                <div class="step"><span class="info">Step 3:</span> Doctor clicks "📷 Upload Medical Images" and selects image files</div>
+                <div class="step"><span class="info">Step 4:</span> Images are securely stored in the patient's record</div>
+                <div class="step"><span class="info">Step 5:</span> Both doctor and patient can view, download, or print images</div>
+            </div>
+        </div>
+        
+        <div class="feature-box">
+            <h3 class="feature-title">🖼️ Supported Image Types</h3>
+            <ul>
+                <li><span class="info">JPEG</span> (.jpg, .jpeg) - Common photo format</li>
+                <li><span class="info">PNG</span> (.png) - Supports transparency</li>
+                <li><span class="info">GIF</span> (.gif) - Animated or static images</li>
+                <li><span class="info">WEBP</span> (.webp) - Modern compressed format</li>
+            </ul>
+            <p><strong>Maximum file size:</strong> 5MB per image</p>
+        </div>
+        
+        <div class="feature-box">
+            <h3 class="feature-title">👁️ Viewing & Downloading</h3>
+            <p>For each uploaded image, users can:</p>
+            <ul>
+                <li><span class="success">View</span> - Opens image in a new window with zoom/print capabilities</li>
+                <li><span class="success">Download</span> - Saves image to local device</li>
+                <li><span class="success">Print</span> - Direct printing from the preview window</li>
+            </ul>
+        </div>
+        
+        <div class="feature-box">
+            <h3 class="feature-title">🔐 Security & Privacy</h3>
+            <ul>
+                <li>Images are stored in the patient's secure record</li>
+                <li>Only authorized doctors with patient ID can upload images</li>
+                <li>Patients can only access their own uploaded images</li>
+                <li>All images are base64 encoded for secure storage</li>
+            </ul>
+        </div>
+        
+        <div class="feature-box">
+            <h3 class="feature-title">🏥 Medical Use Cases</h3>
+            <p>This feature is designed for medical professionals to share:</p>
+            <ul>
+                <li>X-ray images</li>
+                <li>MRI/CT scan results</li>
+                <li>Ultrasound images</li>
+                <li>Photographs of injuries or skin conditions</li>
+                <li>Surgical site photos</li>
+                <li>Diagnostic test images</li>
+            </ul>
+        </div>
+        
+        <div class="feature-box">
+            <h3 class="feature-title">🚀 How to Test</h3>
+            <ol>
+                <li>Open <span class="highlight">doctor (2).html</span> in your browser</li>
+                <li>Login as a doctor</li>
+                <li>Load an existing patient or create a new one</li>
+                <li>Scroll down to the "📁 Upload Patient Images" section</li>
+                <li>Click "📷 Upload Medical Images" and select a test image</li>
+                <li>Verify the image appears in the gallery with View/Download buttons</li>
+                <li>Test both View and Download functionality</li>
+                <li>Access the patient portal to verify the patient can also see the images</li>
+            </ol>
+        </div>
+    </div>
+</body>
+</html>
