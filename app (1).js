@@ -888,8 +888,32 @@ const COMMON_MEDICINES = [
     
     // Others
     'levothyroxine', 'thyroxine', 'allopurinol', 'colchicine', 'gabapentin',
-    'pregabalin', 'diazepam', 'alprazolam', 'clonazepam', 'phenytoin',
-    'carbamazepine', 'valproate', 'levetiracetam', 'tamsulosin', 'finasteride'
+    'pregabalin', 'diazepam', 'alprazolam', 'clonazepam', 'lorazepam', 'midazolam', 'phenytoin',
+    'carbamazepine', 'valproate', 'levetiracetam', 'tamsulosin', 'finasteride',
+
+    // Interaction-focused additions (to support dangerous drug-drug checks)
+    'sertraline', 'fluoxetine', 'paroxetine', 'citalopram', 'escitalopram', 'fluvoxamine',
+    'phenelzine', 'tranylcypromine', 'isocarboxazid', 'selegiline',
+    'meperidine', 'oxycodone', 'hydrocodone', 'fentanyl', 'methadone',
+    'itraconazole', 'posaconazole', 'voriconazole', 'rifampin',
+    'sirolimus', 'tacrolimus', 'cyclosporine',
+    'methotrexate', 'colchicine', 'digoxin', 'amiodarone', 'dronedarone',
+    'pimozide', 'terfenadine', 'linezolid', 'quetiapine',
+    'lovastatin', 'gemfibrozil', 'fenofibrate',
+    'lithium', 'amiloride', 'eplerenone',
+    'pseudoephedrine', 'tamoxifen', 'cimetidine',
+    'tetracycline',
+    'cisplatin', 'gentamicin', 'amikacin', 'tobramycin',
+
+    // OTC / food / supplement terms used in interaction rules
+    'alcohol', 'ethanol', 'grapefruit', 'grapefruit juice',
+    "st johns wort", "st. john's wort",
+    'vitamin k', 'vitamin e', 'green tea', 'turmeric', 'ginkgo', 'ginkgo biloba',
+    'birth control', 'oral contraceptive', 'contraceptive', 'birth control pills',
+    'potassium', 'potassium supplement', 'potassium chloride',
+    'iodinated contrast', 'caffeine', 'melatonin',
+    'bupropion', 'rosiglitazone', 'levodopa', 'meperidine',
+    'probiotic', 'probiotics', 'licorice', 'licorice root'
 ];
 
 // Medicine name variations and common forms
@@ -1598,44 +1622,41 @@ function handleImageUpload(event) {
         };
         
         // Save image to patient record
-        addImageToPatient(imageData);
+        void addImageToPatient(imageData);
     };
     reader.readAsDataURL(file);
 }
 
-function addImageToPatient(imageData) {
+async function addImageToPatient(imageData) {
     if (!currentPatientId) {
         alert('No patient selected');
         return;
     }
-    
-    const patientData = getPatientData(currentPatientId);
-    if (!patientData) {
-        alert('Patient not found');
+
+    const patientId = normalizePatientId(currentPatientId);
+
+    try {
+        await savePatientImage(patientId, imageData);
+        await fetchPatientData(patientId); // refresh cache
+    } catch (e) {
+        alert('Failed to upload image to the database. Please try again.');
         return;
     }
-    
-    // Initialize images array if it doesn't exist
-    if (!patientData.images) {
-        patientData.images = [];
-    }
-    
-    patientData.images.push(imageData);
-    savePatient(currentPatientId, patientData);
-    
+
     // Refresh the image gallery
-    displayPatientImages();
-    
+    void displayPatientImages();
+
     // Reset file input
-    document.getElementById('imageUpload').value = '';
-    
+    const input = document.getElementById('imageUpload');
+    if (input) input.value = '';
+
     alert('Image uploaded successfully!');
 }
 
-function displayPatientImages() {
+async function displayPatientImages() {
     const imageGallery = document.getElementById('imageGallery');
     if (!imageGallery) return;
-    
+
     // Determine if we're in doctor view or patient view
     let patientId = currentPatientId;
     if (!patientId) {
@@ -1645,18 +1666,30 @@ function displayPatientImages() {
             patientId = patientIdDisplay.textContent;
         }
     }
-    
+
     if (!patientId) {
         imageGallery.innerHTML = '<p class="no-images">No patient selected</p>';
         return;
     }
-    
-    const patientData = getPatientData(patientId);
-    if (!patientData || !patientData.images || patientData.images.length === 0) {
+
+    patientId = normalizePatientId(patientId);
+
+    let patientData = getPatientData(patientId);
+    if (!patientData) {
+        try {
+            imageGallery.innerHTML = '<p class="no-images">Loading images...</p>';
+            patientData = await fetchPatientData(patientId);
+        } catch (e) {
+            imageGallery.innerHTML = '<p class="no-images">Unable to load images (server not reachable).</p>';
+            return;
+        }
+    }
+
+    if (!patientData.images || patientData.images.length === 0) {
         imageGallery.innerHTML = '<p class="no-images">No images uploaded for this patient</p>';
         return;
     }
-    
+
     const imagesHtml = patientData.images.map(img => `
         <div class="image-item" style="border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 8px; background: #fafafa;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
@@ -1674,15 +1707,25 @@ function displayPatientImages() {
             </div>
         </div>
     `).join('');
-    
+
     imageGallery.innerHTML = imagesHtml;
 }
 
 function viewImage(imageId) {
-    if (!currentPatientId) return;
-    
-    const patientData = getPatientData(currentPatientId);
-    const image = patientData.images.find(img => img.id === imageId);
+    // Works in both doctor and patient portal
+    let patientId = currentPatientId;
+    if (!patientId) {
+        const patientIdDisplay = document.getElementById('patientIdDisplay');
+        if (patientIdDisplay && patientIdDisplay.textContent && patientIdDisplay.textContent !== 'Loading...') {
+            patientId = patientIdDisplay.textContent;
+        }
+    }
+
+    patientId = patientId ? normalizePatientId(patientId) : null;
+    if (!patientId) return;
+
+    const patientData = getPatientData(patientId);
+    const image = (patientData && patientData.images) ? patientData.images.find(img => img.id === imageId) : null;
     
     if (!image) {
         alert('Image not found');
@@ -1724,10 +1767,20 @@ function viewImage(imageId) {
 }
 
 function downloadImage(imageId) {
-    if (!currentPatientId) return;
-    
-    const patientData = getPatientData(currentPatientId);
-    const image = patientData.images.find(img => img.id === imageId);
+    // Works in both doctor and patient portal
+    let patientId = currentPatientId;
+    if (!patientId) {
+        const patientIdDisplay = document.getElementById('patientIdDisplay');
+        if (patientIdDisplay && patientIdDisplay.textContent && patientIdDisplay.textContent !== 'Loading...') {
+            patientId = patientIdDisplay.textContent;
+        }
+    }
+
+    patientId = patientId ? normalizePatientId(patientId) : null;
+    if (!patientId) return;
+
+    const patientData = getPatientData(patientId);
+    const image = (patientData && patientData.images) ? patientData.images.find(img => img.id === imageId) : null;
     
     if (!image) {
         alert('Image not found');
@@ -1755,27 +1808,122 @@ function getCurrentRole() {
     return localStorage.getItem('currentRole');
 }
 
-function getAllPatients() {
-    const patients = localStorage.getItem('patients');
-    return patients ? JSON.parse(patients) : {};
+// ============================================
+// API-BASED PATIENT STORAGE (SQLite via server.js)
+// ============================================
+
+// If you open HTML directly (file://), relative fetch won't work reliably.
+// In that case, use localhost API base.
+const API_BASE = (typeof window !== 'undefined' && window.location && window.location.protocol === 'file:')
+    ? 'http://localhost:3000'
+    : '';
+
+const PATIENT_CACHE = {};
+
+async function apiFetchJson(path, options = {}) {
+    const url = `${API_BASE}${path}`;
+
+    const headers = Object.assign(
+        { 'Content-Type': 'application/json' },
+        options.headers || {}
+    );
+
+    const res = await fetch(url, Object.assign({}, options, { headers }));
+
+    if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`API ${res.status}: ${text || res.statusText}`);
+    }
+
+    // Some endpoints may return empty bodies; handle gracefully
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+        return null;
+    }
+
+    return await res.json();
 }
 
-function savePatient(patientId, patientData) {
-    const patients = getAllPatients();
-    patients[patientId] = patientData;
-    localStorage.setItem('patients', JSON.stringify(patients));
+function normalizePatientId(patientId) {
+    return (patientId || '').toString().trim().toUpperCase();
 }
 
 function getPatientData(patientId) {
-    const patients = getAllPatients();
-    return patients[patientId] || null;
+    const id = normalizePatientId(patientId);
+    return PATIENT_CACHE[id] || null;
+}
+
+async function fetchPatientData(patientId) {
+    const id = normalizePatientId(patientId);
+    const data = await apiFetchJson(`/api/patients/${encodeURIComponent(id)}`, { method: 'GET' });
+
+    // Normalize shape so UI doesn't crash
+    const normalized = Object.assign(
+        {
+            exists: false,
+            id,
+            name: '',
+            age: '',
+            gender: '',
+            conditions: [],
+            reports: [],
+            prescriptions: [],
+            images: []
+        },
+        data || {}
+    );
+
+    PATIENT_CACHE[id] = normalized;
+    return normalized;
+}
+
+async function savePatient(patientId, patientData) {
+    const id = normalizePatientId(patientId);
+
+    const payload = {
+        name: patientData?.name,
+        age: patientData?.age,
+        gender: patientData?.gender,
+        conditions: patientData?.conditions
+    };
+
+    await apiFetchJson(`/api/patients/${encodeURIComponent(id)}`, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+    });
+
+    return await fetchPatientData(id);
+}
+
+async function savePatientReport(patientId, reportData) {
+    const id = normalizePatientId(patientId);
+    await apiFetchJson(`/api/patients/${encodeURIComponent(id)}/reports`, {
+        method: 'POST',
+        body: JSON.stringify(reportData)
+    });
+}
+
+async function savePatientPrescription(patientId, prescriptionData) {
+    const id = normalizePatientId(patientId);
+    await apiFetchJson(`/api/patients/${encodeURIComponent(id)}/prescriptions`, {
+        method: 'POST',
+        body: JSON.stringify(prescriptionData)
+    });
+}
+
+async function savePatientImage(patientId, imageData) {
+    const id = normalizePatientId(patientId);
+    await apiFetchJson(`/api/patients/${encodeURIComponent(id)}/images`, {
+        method: 'POST',
+        body: JSON.stringify(imageData)
+    });
 }
 
 // ============================================
 // AUTHENTICATION & NAVIGATION
 // ============================================
 
-function loginAsPatient() {
+async function loginAsPatient() {
     const patientIdInput = document.getElementById('patientIdInput').value.trim();
     
     if (!patientIdInput) {
@@ -1788,28 +1936,20 @@ function loginAsPatient() {
         alert('Patient ID must be at least 3 characters long');
         return;
     }
-    
-    const patientId = patientIdInput.toUpperCase();
-    
-    // Check if patient exists, if not create new
-    let patientData = getPatientData(patientId);
-    
-    if (!patientData) {
-        // New patient - initialize data
-        patientData = {
-            id: patientId,
-            conditions: [],
-            reports: [],
-            images: [],
-            prescriptions: [],
-            createdAt: new Date().toISOString()
-        };
-        savePatient(patientId, patientData);
+
+    const patientId = normalizePatientId(patientIdInput);
+
+    // Ensure patient exists in the shared SQLite DB (via server API)
+    try {
+        await savePatient(patientId, {});
+    } catch (e) {
+        alert('Cannot connect to the patient database server. Please start the server (npm start) and try again.');
+        return;
     }
-    
+
     localStorage.setItem('currentUserId', patientId);
     localStorage.setItem('currentRole', 'patient');
-    
+
     window.location.href = 'patient (2).html';
 }
 
@@ -1831,36 +1971,44 @@ function logout() {
 // PATIENT DASHBOARD FUNCTIONS
 // ============================================
 
-function initializePatientDashboard() {
+async function initializePatientDashboard() {
     const role = getCurrentRole();
     if (role !== 'patient') {
         window.location.href = 'index (2).html';
         return;
     }
-    
+
     const patientId = getCurrentUserId();
-    const patientData = getPatientData(patientId);
-    
-    if (!patientData) {
-        alert('Patient data not found. Please login again.');
+
+    let patientData = null;
+    try {
+        patientData = await fetchPatientData(patientId);
+
+        // If this patient ID doesn't exist in DB for some reason, create it.
+        if (patientData && patientData.exists === false) {
+            await savePatient(patientId, {});
+            patientData = await fetchPatientData(patientId);
+        }
+    } catch (e) {
+        alert('Cannot connect to the patient database server. Please start the server (npm start) and try again.');
         logout();
         return;
     }
-    
+
     // Display patient ID
-    document.getElementById('patientIdDisplay').textContent = patientId;
-    
+    document.getElementById('patientIdDisplay').textContent = normalizePatientId(patientId);
+
     // Load and display uploaded files
     displayUploadedFiles(patientData);
-    
+
     // Display extracted conditions
     displayExtractedConditions(patientData);
-    
+
     // Load prescriptions
     displayPatientPrescriptions(patientData);
-    
+
     // Display patient images
-    displayPatientImages();
+    void displayPatientImages();
 }
 
 function displayExtractedConditions(patientData) {
@@ -1894,19 +2042,27 @@ async function uploadReports() {
         return;
     }
 
-    const patientId = getCurrentUserId();
-    const patientData = getPatientData(patientId);
+    const patientId = normalizePatientId(getCurrentUserId());
 
-    // Simulate file upload and analysis (read small files as data URLs so doctor can view them)
+    // Ensure patient is loaded
+    try {
+        if (!getPatientData(patientId)) {
+            await fetchPatientData(patientId);
+        }
+    } catch (e) {
+        alert('Cannot connect to the patient database server. Please start the server (npm start) and try again.');
+        return;
+    }
+
+    // Save each report in the SQLite DB
     for (let file of files) {
         const reportData = {
             name: file.name,
             size: file.size,
             type: file.type,
-            uploadedAt: new Date().toISOString(),
             extractedConditions: [], // No automatic condition extraction
             dataUrl: null,
-            summary: null // Summary will be generated by OCR summarizer only
+            summary: null // Summary is not persisted by OCR summarizer currently
         };
 
         // Read file as data URL if reasonably small (<= 2.5 MB)
@@ -1919,17 +2075,17 @@ async function uploadReports() {
             reportData.dataUrl = null;
         }
 
-        patientData.reports.push(reportData);
+        await savePatientReport(patientId, reportData);
     }
 
-    savePatient(patientId, patientData);
+    // Refresh patient data from server so UI reflects DB state
+    const patientData = await fetchPatientData(patientId);
 
     // Clear file input and refresh display
     fileInput.value = '';
     displayUploadedFiles(patientData);
     displayExtractedConditions(patientData);
 
-    // Show feedback
     alert('Reports uploaded successfully! Use the "🔍 Summarize Report (OCR)" button to extract and analyze biomarkers from image reports.');
 }
 
@@ -2080,69 +2236,84 @@ function initializeDoctorDashboard() {
     }
 }
 
-function loadPatient() {
-    const patientIdInput = document.getElementById('patientIdInput').value.trim();
-    
-    if (!patientIdInput) {
+async function loadPatient() {
+    const patientIdInputRaw = document.getElementById('patientIdInput').value.trim();
+
+    if (!patientIdInputRaw) {
         alert('Please enter a Patient ID');
         return;
     }
-    
-    const patientData = getPatientData(patientIdInput);
-    
-    if (!patientData) {
+
+    const patientIdInput = normalizePatientId(patientIdInputRaw);
+
+    let patientData = null;
+    try {
+        patientData = await fetchPatientData(patientIdInput);
+    } catch (e) {
+        alert('Cannot connect to the patient database server. Please start the server (npm start) and try again.');
+        return;
+    }
+
+    if (!patientData || patientData.exists === false) {
         alert('Patient not found. Please check the ID and try again.');
         return;
     }
-    
+
     currentPatientId = patientIdInput;
-    
+
     // Show patient information section
     document.getElementById('patientInfoSection').classList.remove('hidden');
     document.getElementById('prescriptionSection').classList.remove('hidden');
-    
+
     // Display patient ID
     document.getElementById('currentPatientId').textContent = patientIdInput;
-    
+
     // Load patient demographics if available
-    if (patientData.name) {
-        document.getElementById('patientName').value = patientData.name || '';
-        document.getElementById('patientAge').value = patientData.age || '';
-        document.getElementById('patientGender').value = patientData.gender || '';
-    }
-    
+    document.getElementById('patientName').value = patientData.name || '';
+    document.getElementById('patientAge').value = patientData.age || '';
+    document.getElementById('patientGender').value = patientData.gender || '';
+
     // Display medical history disclaimers
     displayPatientDisclaimers(patientData);
-    
+
     // Display uploaded reports
     displayPatientReports(patientData);
-    
+
     // Display patient's prescription history
     displayPatientPrescriptionHistory(patientData);
-    
+
     // Display patient images
-    displayPatientImages();
-    
+    void displayPatientImages();
+
     // Clear previous prescription
     clearPrescription();
     document.getElementById('warningSection').classList.add('hidden');
     document.getElementById('successMessage').classList.add('hidden');
 }
 
-function savePatientDemographics() {
+async function savePatientDemographics() {
     if (!currentPatientId) {
         alert('Please load a patient first');
         return;
     }
-    
+
     const patientData = getPatientData(currentPatientId);
-    
+    if (!patientData) {
+        alert('Patient data not loaded. Please reload the patient.');
+        return;
+    }
+
     patientData.name = document.getElementById('patientName').value.trim();
     patientData.age = document.getElementById('patientAge').value.trim();
     patientData.gender = document.getElementById('patientGender').value;
-    
-    savePatient(currentPatientId, patientData);
-    
+
+    try {
+        await savePatient(currentPatientId, patientData);
+    } catch (e) {
+        alert('Failed to save patient details to the database. Please try again.');
+        return;
+    }
+
     alert('Patient demographics saved successfully!');
 }
 
@@ -3314,6 +3485,264 @@ function parsePrescriptionSimple(text) {
 }
 
 // ============================================
+// DANGEROUS DRUG-TO-DRUG INTERACTIONS DATABASE
+// ============================================
+
+// Keep this minimal in *UI output* (single warning), but comprehensive in detection.
+// This list is derived from the dangerous interaction sets you provided.
+const DANGEROUS_DRUG_INTERACTIONS = (() => {
+    const dedupe = new Set();
+    const pairs = [];
+
+    const norm = (s) => (s || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const add = (a, b) => {
+        const A = norm(a);
+        const B = norm(b);
+        if (!A || !B) return;
+        const key = [A, B].sort().join('|');
+        if (dedupe.has(key)) return;
+        dedupe.add(key);
+        pairs.push({ a: A, b: B });
+    };
+
+    const addMany = (as, bs) => {
+        for (const a of as) {
+            for (const b of bs) {
+                add(a, b);
+            }
+        }
+    };
+
+    // --- Groups (used for class-type interactions like “SSRIs + MAOIs”) ---
+    const GROUPS = {
+        ssri: ['sertraline', 'fluoxetine', 'paroxetine', 'citalopram', 'escitalopram', 'fluvoxamine'],
+        maoi: ['phenelzine', 'tranylcypromine', 'isocarboxazid', 'selegiline'],
+        benzodiazepine: ['diazepam', 'alprazolam', 'clonazepam', 'lorazepam', 'midazolam'],
+        opioid: ['morphine', 'codeine', 'tramadol', 'oxycodone', 'hydrocodone', 'fentanyl', 'methadone'],
+        nsaid: ['ibuprofen', 'diclofenac', 'aspirin', 'naproxen', 'ketorolac', 'piroxicam', 'indomethacin'],
+        macrolide: ['azithromycin', 'clarithromycin', 'erythromycin'],
+        statin: ['simvastatin', 'atorvastatin', 'rosuvastatin', 'lovastatin'],
+        arb: ['losartan', 'telmisartan', 'valsartan'],
+        acei: ['enalapril', 'lisinopril', 'ramipril', 'perindopril'],
+        betablocker: ['atenolol', 'metoprolol', 'propranolol'],
+        ccb: ['amlodipine', 'nifedipine', 'verapamil', 'diltiazem'],
+        diuretic: ['furosemide', 'hydrochlorothiazide', 'spironolactone'],
+        thiazide: ['hydrochlorothiazide'],
+        sulfonylurea: ['glibenclamide', 'gliclazide', 'glimepiride'],
+        anticoagulant: ['warfarin', 'rivaroxaban', 'dabigatran'],
+        pde5: ['sildenafil', 'tadalafil', 'vardenafil'],
+        alphablocker: ['tamsulosin'],
+        sedative: ['diazepam', 'alprazolam', 'clonazepam', 'lorazepam', 'midazolam', 'melatonin'],
+        diabetesMeds: ['insulin', 'metformin', 'glibenclamide', 'gliclazide', 'glimepiride', 'pioglitazone', 'sitagliptin'],
+        tetracycline: ['tetracycline', 'doxycycline'],
+        aminoglycoside: ['gentamicin', 'amikacin', 'tobramycin', 'streptomycin', 'neomycin'],
+        birthControl: ['birth control', 'oral contraceptive', 'contraceptive', 'birth control pills'],
+        grapefruit: ['grapefruit', 'grapefruit juice'],
+        alcohol: ['alcohol', 'ethanol'],
+        potassiumSupp: ['potassium', 'potassium supplement', 'potassium chloride'],
+        fibrate: ['gemfibrozil', 'fenofibrate'],
+        antacid: ['antacid', 'aluminium hydroxide', 'magnesium hydroxide'],
+        minerals: ['calcium', 'calcium supplement', 'iron', 'iron supplement', 'magnesium', 'zinc'],
+        supplements: ['st johns wort', "st. john's wort", 'vitamin k', 'green tea', 'omega-3', 'turmeric', 'ginkgo', 'ginkgo biloba', 'vitamin e', 'ashwagandha', 'licorice', 'licorice root', 'caffeine'],
+        pgpInhibitor: ['amiodarone', 'verapamil', 'dronedarone', 'clarithromycin', 'ketoconazole', 'itraconazole', 'posaconazole', 'voriconazole'],
+        cyp2c8Inhibitor: ['gemfibrozil'],
+        antidepressant: ['sertraline', 'fluoxetine', 'paroxetine', 'citalopram', 'escitalopram', 'fluvoxamine', 'bupropion'],
+    };
+
+    // --- Direct (specific) dangerous pairs ---
+    add('ibuprofen', 'warfarin');
+    add('warfarin', 'aspirin');
+    add('simvastatin', 'itraconazole');
+    add('digoxin', 'amiodarone');
+    add('warfarin', 'fluconazole');
+    add('theophylline', 'ciprofloxacin');
+    add('cisplatin', 'gentamicin'); // representative aminoglycoside example
+    add('clopidogrel', 'omeprazole');
+    add('rivaroxaban', 'ketoconazole');
+    add('amiodarone', 'warfarin');
+    add('verapamil', 'simvastatin');
+    add('posaconazole', 'tacrolimus');
+    add('voriconazole', 'sirolimus');
+    add('sirolimus', 'rifampin');
+    add('tacrolimus', 'rifampin');
+    add('rifampin', 'birth control');
+    add('griseofulvin', 'birth control');
+    add('clarithromycin', 'amlodipine');
+    add('nifedipine', 'clarithromycin');
+    add('erythromycin', 'lovastatin');
+    add('ciprofloxacin', 'warfarin');
+    add('trimethoprim-sulfamethoxazole', 'warfarin');
+    add('co-trimoxazole', 'warfarin');
+    add('azithromycin', 'amiodarone');
+    add('linezolid', 'sertraline');
+    add('metronidazole', 'alcohol');
+    add('fluoxetine', 'metoprolol');
+    add('paroxetine', 'tamoxifen');
+    add('quetiapine', 'clarithromycin');
+    add('digoxin', 'verapamil');
+    add('amiloride', 'potassium');
+    add('metformin', 'cimetidine');
+    add('metformin', 'iodinated contrast');
+    add('levothyroxine', 'omeprazole');
+    add('metoprolol', 'insulin');
+    add('pioglitazone', 'insulin');
+    add('sitagliptin', 'digoxin');
+    add('caffeine', 'theophylline');
+    add('vitamin k', 'warfarin');
+    add('green tea', 'warfarin');
+    add('ashwagandha', 'levothyroxine');
+
+    // Additional specific pairs from your lists
+    add('fluconazole', 'sertraline');
+    add('sertraline', 'amiodarone');
+    add('ibuprofen', 'hydrochlorothiazide');
+    add('rosiglitazone', 'gemfibrozil');
+    add('ibuprofen', 'paracetamol');
+    add('aspirin', 'alcohol');
+    add('calcium', 'levothyroxine');
+    add('iron', 'levodopa');
+
+    // --- Group-based expansions ---
+    // SSRIs + MAOIs
+    addMany(GROUPS.ssri, GROUPS.maoi);
+
+    // Bupropion + MAOIs
+    addMany(['bupropion'], GROUPS.maoi);
+
+    // MAOIs + Meperidine
+    addMany(GROUPS.maoi, ['meperidine']);
+
+    // Linezolid + SSRIs
+    addMany(['linezolid'], GROUPS.ssri);
+
+    // Benzodiazepines + Opioids
+    addMany(GROUPS.benzodiazepine, GROUPS.opioid);
+
+    // Methotrexate + NSAIDs
+    addMany(['methotrexate'], GROUPS.nsaid);
+
+    // Colchicine + Clarithromycin
+    add('colchicine', 'clarithromycin');
+
+    // Pimozide + Macrolides
+    addMany(['pimozide'], GROUPS.macrolide);
+
+    // Terfenadine + Ketoconazole
+    add('terfenadine', 'ketoconazole');
+
+    // Cyclosporine + St. John’s Wort
+    addMany(['cyclosporine'], ['st johns wort', "st. john's wort"]);
+
+    // Dronedarone + Statins
+    addMany(['dronedarone'], GROUPS.statin);
+
+    // Dabigatran + P-gp inhibitors
+    addMany(['dabigatran'], GROUPS.pgpInhibitor);
+
+    // Levofloxacin + NSAIDs
+    addMany(['levofloxacin'], GROUPS.nsaid);
+
+    // SSRIs + Tramadol
+    addMany(GROUPS.ssri, ['tramadol']);
+
+    // Macrolides + Carbamazepine
+    addMany(GROUPS.macrolide, ['carbamazepine']);
+
+    // Doxycycline + Antacids
+    addMany(['doxycycline'], GROUPS.antacid);
+
+    // Phenelzine + Pseudoephedrine
+    add('phenelzine', 'pseudoephedrine');
+
+    // Fluoxetine + Beta blockers
+    addMany(['fluoxetine'], GROUPS.betablocker);
+
+    // Lithium + Diuretics (and Thiazides specifically)
+    addMany(['lithium'], GROUPS.diuretic);
+    addMany(['lithium'], GROUPS.thiazide);
+
+    // St. John’s Wort + Oral contraceptives
+    addMany(['st johns wort', "st. john's wort"], GROUPS.birthControl);
+
+    // Phenobarbital + Antidepressants
+    addMany(['phenobarbital'], GROUPS.antidepressant);
+
+    // Lisinopril + Spironolactone / Spironolactone + ACE inhibitors
+    add('lisinopril', 'spironolactone');
+    addMany(['spironolactone'], GROUPS.acei);
+
+    // ACE inhibitors + NSAIDs / ARBs + NSAIDs
+    addMany(GROUPS.acei, GROUPS.nsaid);
+    addMany(GROUPS.arb, GROUPS.nsaid);
+
+    // Beta blockers + Calcium blockers (clinically most concerning with verapamil/diltiazem)
+    addMany(GROUPS.betablocker, ['verapamil', 'diltiazem']);
+
+    // Insulin + beta blockers (masked hypoglycemia)
+    addMany(['insulin'], GROUPS.betablocker);
+
+    // Calcium channel blockers + Grapefruit
+    addMany(GROUPS.ccb, GROUPS.grapefruit);
+
+    // Licorice + blood pressure meds / diuretics (OTC/herbal)
+    addMany(['licorice', 'licorice root'], [...GROUPS.acei, ...GROUPS.arb, ...GROUPS.betablocker, ...GROUPS.ccb]);
+    addMany(['licorice', 'licorice root'], GROUPS.diuretic);
+
+    // Minerals (calcium/magnesium/zinc/iron) + quinolones (absorption reduction)
+    addMany(['ciprofloxacin', 'levofloxacin'], ['calcium', 'magnesium', 'zinc', 'iron']);
+
+    // Melatonin + sedatives (additive CNS depression)
+    addMany(['melatonin'], GROUPS.benzodiazepine);
+    addMany(['melatonin'], GROUPS.opioid);
+
+    // Probiotics + antibiotics (reduced probiotic effect)
+    addMany(['probiotic', 'probiotics'], ['amoxicillin', 'azithromycin', 'ciprofloxacin', 'levofloxacin', 'doxycycline', 'metronidazole', 'cephalexin']);
+
+    // Statins + Fibrates
+    addMany(GROUPS.statin, GROUPS.fibrate);
+
+    // Sulfonylureas + Alcohol / Alcohol + diabetes meds / Alcohol + sedatives
+    addMany(GROUPS.sulfonylurea, GROUPS.alcohol);
+    addMany(GROUPS.diabetesMeds, GROUPS.alcohol);
+    addMany(GROUPS.sedative, GROUPS.alcohol);
+
+    // Aspirin + NSAIDs
+    addMany(['aspirin'], GROUPS.nsaid);
+
+    // Tetracyclines + minerals (calcium/magnesium/zinc/iron chelation)
+    addMany(GROUPS.tetracycline, GROUPS.minerals);
+
+    // Rivaroxaban + Ketoconazole already added; also include other strong azoles for completeness
+    addMany(['rivaroxaban'], ['itraconazole', 'posaconazole', 'voriconazole']);
+
+    // Cisplatin + Aminoglycosides
+    addMany(['cisplatin'], GROUPS.aminoglycoside);
+
+    // Alpha blockers + PDE5 inhibitors
+    addMany(GROUPS.alphablocker, GROUPS.pde5);
+
+    // Eplerenone + ACE inhibitors
+    addMany(['eplerenone'], GROUPS.acei);
+
+    // Vitamin D + Thiazides
+    add('vitamin d', 'hydrochlorothiazide');
+
+    // Omega-3 / Turmeric / Ginkgo / Vitamin E + anticoagulants
+    addMany(['omega-3'], GROUPS.anticoagulant);
+    addMany(['turmeric'], GROUPS.anticoagulant);
+    addMany(['ginkgo', 'ginkgo biloba'], GROUPS.anticoagulant);
+    addMany(['vitamin e'], GROUPS.anticoagulant);
+
+    // Return final list
+    return pairs;
+})();
+
+// ============================================
 // DRUG INTERACTION CHECKING
 // ============================================
 
@@ -3322,17 +3751,17 @@ function checkAllDrugInteractions() {
         return;
     }
     
-    const patientData = getPatientData(currentPatientId);
-    if (!patientData || patientData.conditions.length === 0) {
-        document.getElementById('warningSection').classList.add('hidden');
-        return;
-    }
+    const patientData = getPatientData(currentPatientId) || { conditions: [] };
     
     const warnings = [];
     const medicines = getAllMedicines();
     
-    // Check each medicine
-    medicines.forEach(medicine => {
+    // 1) Drug-to-drug interactions (should work even if patient has no recorded conditions)
+    warnings.push(...checkDrugToDrugInteractions(medicines));
+    
+    // 2) Drug-to-condition contraindications (existing behavior)
+    if (patientData && Array.isArray(patientData.conditions) && patientData.conditions.length > 0) {
+        medicines.forEach(medicine => {
         const drugName = medicine.name.toLowerCase();
         
         // Check for each drug in the database
@@ -3370,13 +3799,68 @@ function checkAllDrugInteractions() {
                 }
             }
         }
-    });
+        });
+    }
     
     if (warnings.length > 0) {
         displayWarnings(warnings);
     } else {
         document.getElementById('warningSection').classList.add('hidden');
     }
+}
+
+// Check for dangerous drug-to-drug interactions
+function normalizeDrugText(text) {
+    return (text || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function getCanonicalDrugName(drugName) {
+    const normalized = normalizeDrugText(drugName);
+
+    // Map brand aliases to known generic names
+    for (const [alias, actualDrug] of Object.entries(DRUG_ALIASES)) {
+        const aliasNorm = normalizeDrugText(alias);
+        if (aliasNorm && normalized.includes(aliasNorm)) {
+            return normalizeDrugText(actualDrug);
+        }
+    }
+
+    // Normalize to known interaction tokens if present
+    for (const pair of DANGEROUS_DRUG_INTERACTIONS) {
+        const a = normalizeDrugText(pair.a);
+        const b = normalizeDrugText(pair.b);
+        if (a && normalized.includes(a)) return a;
+        if (b && normalized.includes(b)) return b;
+    }
+
+    return normalized;
+}
+
+function checkDrugToDrugInteractions(medicines) {
+    if (!medicines || medicines.length < 2) {
+        return [];
+    }
+
+    for (let i = 0; i < medicines.length; i++) {
+        for (let j = i + 1; j < medicines.length; j++) {
+            const a = getCanonicalDrugName(medicines[i].name);
+            const b = getCanonicalDrugName(medicines[j].name);
+
+            for (const pair of DANGEROUS_DRUG_INTERACTIONS) {
+                const match = (a === pair.a && b === pair.b) || (a === pair.b && b === pair.a);
+                if (match) {
+                    // Intentionally minimal output: one warning even if multiple interactions exist.
+                    return [{ type: 'drug-drug' }];
+                }
+            }
+        }
+    }
+
+    return [];
 }
 
 function displayWarnings(warnings) {
@@ -3392,18 +3876,30 @@ function displayWarnings(warnings) {
         'asthma': 'Asthma'
     };
     
-    warningMessages.innerHTML = warnings.map(warning => `
-        <div class="warning-item">
-            <strong class="drug-name">${warning.drug.toUpperCase()}</strong>
-            <p style="margin: var(--spacing-xs) 0;">
-                <strong>Patient Condition:</strong> ${conditionLabels[warning.condition]}
-            </p>
-            <p style="margin: var(--spacing-xs) 0;">
-                ${warning.message}
-            </p>
-            <p class="warning-source">Source: ${warning.source}</p>
-        </div>
-    `).join('');
+    warningMessages.innerHTML = warnings.map(warning => {
+        if (warning.type === 'drug-drug') {
+            // Keep output minimal (per requirement)
+            return `
+                <div class="warning-item">
+                    <strong class="drug-name">DANGEROUS DRUG INTERACTION DETECTED</strong>
+                </div>
+            `;
+        }
+
+        // Condition-based contraindication warning format (existing behavior)
+        return `
+            <div class="warning-item">
+                <strong class="drug-name">${warning.drug.toUpperCase()}</strong>
+                <p style="margin: var(--spacing-xs) 0;">
+                    <strong>Patient Condition:</strong> ${conditionLabels[warning.condition]}
+                </p>
+                <p style="margin: var(--spacing-xs) 0;">
+                    ${warning.message}
+                </p>
+                <p class="warning-source">Source: ${warning.source}</p>
+            </div>
+        `;
+    }).join('');
     
     warningSection.classList.remove('hidden');
     
@@ -3416,7 +3912,7 @@ function displayWarnings(warnings) {
 // PRESCRIPTION SAVING
 // ============================================
 
-function savePrescription() {
+async function savePrescription() {
     if (!currentPatientId) {
         alert('Please load a patient first');
         return;
@@ -3441,6 +3937,11 @@ function savePrescription() {
     }
     
     const patientData = getPatientData(currentPatientId);
+    if (!patientData) {
+        alert('Patient data not loaded. Please reload the patient.');
+        return;
+    }
+
     const overrideReason = document.getElementById('overrideReason').value.trim();
     
     // Collect all prescription data
@@ -3501,10 +4002,17 @@ function savePrescription() {
     }
     
     prescriptionData.content = prescriptionContent;
-    
-    patientData.prescriptions.push(prescriptionData);
-    savePatient(currentPatientId, patientData);
-    
+
+    try {
+        await savePatientPrescription(currentPatientId, prescriptionData);
+        const refreshed = await fetchPatientData(currentPatientId);
+        // Refresh prescription history panel (doctor view)
+        displayPatientPrescriptionHistory(refreshed);
+    } catch (e) {
+        alert('Failed to save prescription to the database. Please try again.');
+        return;
+    }
+
     // Show success message
     document.getElementById('successMessage').classList.remove('hidden');
     

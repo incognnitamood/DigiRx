@@ -26,6 +26,8 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
         console.error('Error opening database:', err);
     } else {
         console.log('Connected to SQLite database');
+        // Enforce foreign keys in SQLite
+        db.run('PRAGMA foreign_keys = ON');
         initializeDatabase();
     }
 });
@@ -77,6 +79,18 @@ function initializeDatabase() {
             FOREIGN KEY (patient_id) REFERENCES patients(id)
         )`);
 
+        // Images table (doctor-uploaded medical images)
+        db.run(`CREATE TABLE IF NOT EXISTS images (
+            id TEXT PRIMARY KEY,
+            patient_id TEXT NOT NULL,
+            filename TEXT,
+            filetype TEXT,
+            data_url TEXT,
+            uploaded_at TEXT,
+            uploaded_by TEXT,
+            FOREIGN KEY (patient_id) REFERENCES patients(id)
+        )`);
+
         console.log('Database tables initialized');
     });
 }
@@ -88,6 +102,20 @@ function safeParseJSON(str, defaultValue = []) {
     } catch (e) {
         return defaultValue;
     }
+}
+
+function ensurePatientExists(patientId, cb) {
+    const now = new Date().toISOString();
+    db.get('SELECT id FROM patients WHERE id = ?', [patientId], (err, row) => {
+        if (err) return cb(err);
+        if (row) return cb(null);
+
+        db.run(
+            'INSERT INTO patients (id, name, age, gender, conditions, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [patientId, '', '', '', JSON.stringify([]), now, now],
+            (err) => cb(err || null)
+        );
+    });
 }
 
 // ============================================
@@ -108,6 +136,7 @@ app.get('/api/patients/:patientId', (req, res) => {
             if (!patient) {
                 // Patient doesn't exist - return empty structure
                 return res.json({
+                    exists: false,
                     id: patientId,
                     name: '',
                     age: '',
@@ -115,6 +144,7 @@ app.get('/api/patients/:patientId', (req, res) => {
                     conditions: [],
                     reports: [],
                     prescriptions: [],
+                    images: [],
                     createdAt: new Date().toISOString()
                 });
             }
@@ -131,40 +161,56 @@ app.get('/api/patients/:patientId', (req, res) => {
                         return res.status(500).json({ error: 'Database error fetching prescriptions', details: err.message });
                     }
 
-                    // Format response
-                    const patientData = {
-                        id: patient.id,
-                        name: patient.name || '',
-                        age: patient.age || '',
-                        gender: patient.gender || '',
-                        conditions: safeParseJSON(patient.conditions, []),
-                        reports: reports.map(r => ({
-                            name: r.name,
-                            size: r.size,
-                            type: r.type,
-                            uploadedAt: r.uploaded_at,
-                            extractedConditions: safeParseJSON(r.extracted_conditions, []),
-                            dataUrl: r.data_url,
-                            summary: r.summary
-                        })),
-                        prescriptions: prescriptions.map(p => ({
-                            patientName: p.patient_name,
-                            patientAge: p.patient_age,
-                            patientGender: p.patient_gender,
-                            medicines: safeParseJSON(p.medicines, []),
-                            dietaryAdvice: p.dietary_advice || '',
-                            generalInstructions: p.general_instructions || '',
-                            followUp: p.follow_up || '',
-                            doctorId: p.doctor_id,
-                            content: p.content || '',
-                            warnings: p.warnings === 1,
-                            doctorNotes: p.doctor_notes || '',
-                            date: p.date
-                        })),
-                        createdAt: patient.created_at || new Date().toISOString()
-                    };
+                    // Get images
+                    db.all('SELECT * FROM images WHERE patient_id = ? ORDER BY uploaded_at DESC', [patientId], (err, images) => {
+                        if (err) {
+                            return res.status(500).json({ error: 'Database error fetching images', details: err.message });
+                        }
 
-                    res.json(patientData);
+                        // Format response
+                        const patientData = {
+                            exists: true,
+                            id: patient.id,
+                            name: patient.name || '',
+                            age: patient.age || '',
+                            gender: patient.gender || '',
+                            conditions: safeParseJSON(patient.conditions, []),
+                            reports: reports.map(r => ({
+                                name: r.name,
+                                size: r.size,
+                                type: r.type,
+                                uploadedAt: r.uploaded_at,
+                                extractedConditions: safeParseJSON(r.extracted_conditions, []),
+                                dataUrl: r.data_url,
+                                summary: r.summary
+                            })),
+                            prescriptions: prescriptions.map(p => ({
+                                patientName: p.patient_name,
+                                patientAge: p.patient_age,
+                                patientGender: p.patient_gender,
+                                medicines: safeParseJSON(p.medicines, []),
+                                dietaryAdvice: p.dietary_advice || '',
+                                generalInstructions: p.general_instructions || '',
+                                followUp: p.follow_up || '',
+                                doctorId: p.doctor_id,
+                                content: p.content || '',
+                                warnings: p.warnings === 1,
+                                doctorNotes: p.doctor_notes || '',
+                                date: p.date
+                            })),
+                            images: images.map(img => ({
+                                id: img.id,
+                                filename: img.filename,
+                                filetype: img.filetype,
+                                data: img.data_url,
+                                uploadedAt: img.uploaded_at,
+                                uploadedBy: img.uploaded_by
+                            })),
+                            createdAt: patient.created_at || new Date().toISOString()
+                        };
+
+                        res.json(patientData);
+                    });
                 });
             });
         });
@@ -179,17 +225,22 @@ app.post('/api/patients/:patientId', (req, res) => {
     const now = new Date().toISOString();
 
     db.serialize(() => {
-        // Check if patient exists
-        db.get('SELECT id FROM patients WHERE id = ?', [patientId], (err, existing) => {
+        // Load existing patient (if any)
+        db.get('SELECT * FROM patients WHERE id = ?', [patientId], (err, existing) => {
             if (err) {
                 return res.status(500).json({ error: 'Database error', details: err.message });
             }
 
             if (existing) {
-                // Update existing patient
+                // Preserve values if fields are omitted
+                const nextName = (name !== undefined) ? (name || '') : (existing.name || '');
+                const nextAge = (age !== undefined) ? (age || '') : (existing.age || '');
+                const nextGender = (gender !== undefined) ? (gender || '') : (existing.gender || '');
+                const nextConditions = (conditions !== undefined) ? JSON.stringify(conditions || []) : (existing.conditions || JSON.stringify([]));
+
                 db.run(
                     'UPDATE patients SET name = ?, age = ?, gender = ?, conditions = ?, updated_at = ? WHERE id = ?',
-                    [name || '', age || '', gender || '', JSON.stringify(conditions || []), now, patientId],
+                    [nextName, nextAge, nextGender, nextConditions, now, patientId],
                     (err) => {
                         if (err) {
                             return res.status(500).json({ error: 'Database error updating patient', details: err.message });
@@ -221,31 +272,37 @@ app.post('/api/patients/:patientId/reports', (req, res) => {
 
     const uploadedAt = new Date().toISOString();
 
-    db.run(
-        'INSERT INTO reports (patient_id, name, size, type, data_url, extracted_conditions, summary, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [patientId, name, size || 0, type || '', dataUrl || null, JSON.stringify(extractedConditions || []), summary || null, uploadedAt],
-        function(err) {
-            if (err) {
-                return res.status(500).json({ error: 'Database error saving report', details: err.message });
-            }
-
-            // Update patient conditions if new ones detected
-            if (extractedConditions && extractedConditions.length > 0) {
-                db.get('SELECT conditions FROM patients WHERE id = ?', [patientId], (err, patient) => {
-                    if (!err && patient) {
-                        const existingConditions = safeParseJSON(patient.conditions, []);
-                        const updatedConditions = [...new Set([...existingConditions, ...extractedConditions])];
-                        
-                        db.run('UPDATE patients SET conditions = ?, updated_at = ? WHERE id = ?',
-                            [JSON.stringify(updatedConditions), new Date().toISOString(), patientId],
-                            () => {});
-                    }
-                });
-            }
-
-            res.json({ success: true, reportId: this.lastID, message: 'Report saved' });
+    ensurePatientExists(patientId, (err) => {
+        if (err) {
+            return res.status(500).json({ error: 'Database error ensuring patient exists', details: err.message });
         }
-    );
+
+        db.run(
+            'INSERT INTO reports (patient_id, name, size, type, data_url, extracted_conditions, summary, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [patientId, name, size || 0, type || '', dataUrl || null, JSON.stringify(extractedConditions || []), summary || null, uploadedAt],
+            function(err) {
+                if (err) {
+                    return res.status(500).json({ error: 'Database error saving report', details: err.message });
+                }
+
+                // Update patient conditions if new ones detected
+                if (extractedConditions && extractedConditions.length > 0) {
+                    db.get('SELECT conditions FROM patients WHERE id = ?', [patientId], (err, patient) => {
+                        if (!err && patient) {
+                            const existingConditions = safeParseJSON(patient.conditions, []);
+                            const updatedConditions = [...new Set([...existingConditions, ...extractedConditions])];
+                            
+                            db.run('UPDATE patients SET conditions = ?, updated_at = ? WHERE id = ?',
+                                [JSON.stringify(updatedConditions), new Date().toISOString(), patientId],
+                                () => {});
+                        }
+                    });
+                }
+
+                res.json({ success: true, reportId: this.lastID, message: 'Report saved' });
+            }
+        );
+    });
 });
 
 // Save prescription
@@ -255,32 +312,64 @@ app.post('/api/patients/:patientId/prescriptions', (req, res) => {
 
     const date = prescriptionData.date || new Date().toISOString();
 
-    db.run(
-        `INSERT INTO prescriptions 
-        (patient_id, patient_name, patient_age, patient_gender, medicines, dietary_advice, general_instructions, follow_up, doctor_id, content, warnings, doctor_notes, date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-            patientId,
-            prescriptionData.patientName || '',
-            prescriptionData.patientAge || '',
-            prescriptionData.patientGender || '',
-            JSON.stringify(prescriptionData.medicines || []),
-            prescriptionData.dietaryAdvice || '',
-            prescriptionData.generalInstructions || '',
-            prescriptionData.followUp || '',
-            prescriptionData.doctorId || '',
-            prescriptionData.content || '',
-            prescriptionData.warnings ? 1 : 0,
-            prescriptionData.doctorNotes || '',
-            date
-        ],
-        function(err) {
-            if (err) {
-                return res.status(500).json({ error: 'Database error saving prescription', details: err.message });
-            }
-            res.json({ success: true, prescriptionId: this.lastID, message: 'Prescription saved' });
+    ensurePatientExists(patientId, (err) => {
+        if (err) {
+            return res.status(500).json({ error: 'Database error ensuring patient exists', details: err.message });
         }
-    );
+
+        db.run(
+            `INSERT INTO prescriptions 
+            (patient_id, patient_name, patient_age, patient_gender, medicines, dietary_advice, general_instructions, follow_up, doctor_id, content, warnings, doctor_notes, date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                patientId,
+                prescriptionData.patientName || '',
+                prescriptionData.patientAge || '',
+                prescriptionData.patientGender || '',
+                JSON.stringify(prescriptionData.medicines || []),
+                prescriptionData.dietaryAdvice || '',
+                prescriptionData.generalInstructions || '',
+                prescriptionData.followUp || '',
+                prescriptionData.doctorId || '',
+                prescriptionData.content || '',
+                prescriptionData.warnings ? 1 : 0,
+                prescriptionData.doctorNotes || '',
+                date
+            ],
+            function(err) {
+                if (err) {
+                    return res.status(500).json({ error: 'Database error saving prescription', details: err.message });
+                }
+                res.json({ success: true, prescriptionId: this.lastID, message: 'Prescription saved' });
+            }
+        );
+    });
+});
+
+// Upload image
+app.post('/api/patients/:patientId/images', (req, res) => {
+    const patientId = req.params.patientId.toUpperCase();
+    const { id, filename, filetype, data, uploadedAt, uploadedBy } = req.body;
+
+    const imageId = id || ('img_' + Date.now());
+    const ts = uploadedAt || new Date().toISOString();
+
+    ensurePatientExists(patientId, (err) => {
+        if (err) {
+            return res.status(500).json({ error: 'Database error ensuring patient exists', details: err.message });
+        }
+
+        db.run(
+            'INSERT OR REPLACE INTO images (id, patient_id, filename, filetype, data_url, uploaded_at, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [imageId, patientId, filename || '', filetype || '', data || null, ts, uploadedBy || 'Doctor'],
+            function(err) {
+                if (err) {
+                    return res.status(500).json({ error: 'Database error saving image', details: err.message });
+                }
+                res.json({ success: true, imageId, message: 'Image saved' });
+            }
+        );
+    });
 });
 
 // Health check endpoint
