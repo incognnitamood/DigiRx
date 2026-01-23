@@ -1998,6 +1998,9 @@ async function initializePatientDashboard() {
     // Display patient ID
     document.getElementById('patientIdDisplay').textContent = normalizePatientId(patientId);
 
+    // Load patient details form (with immutability check)
+    loadPatientDetailsForm(patientData);
+
     // Load and display uploaded files
     displayUploadedFiles(patientData);
 
@@ -2007,8 +2010,231 @@ async function initializePatientDashboard() {
     // Load prescriptions
     displayPatientPrescriptions(patientData);
 
+    // Load medication tracking
+    loadPatientMedicationTracking(patientId);
+
     // Display patient images
     void displayPatientImages();
+    
+    // Initialize notification system for reminders
+    initializeNotifications();
+}
+
+// Load patient medication tracking
+async function loadPatientMedicationTracking(patientId) {
+    try {
+        // Load today's medications
+        const medicationsResponse = await fetch(`/api/patients/${patientId}/today-medications`);
+        const medications = await medicationsResponse.json();
+        
+        displayTodaysMedications(medications);
+        
+        // Load today's activities
+        const activitiesResponse = await fetch(`/api/patients/${patientId}/today-activities`);
+        const activities = await activitiesResponse.json();
+        
+        displayTodaysActivities(activities);
+    } catch (error) {
+        console.error('Error loading medication tracking:', error);
+    }
+}
+
+// Display today's medications
+function displayTodaysMedications(medications) {
+    const container = document.getElementById('todaysMedications');
+    
+    if (!medications || medications.length === 0) {
+        container.innerHTML = '<p class="empty-state">No active medications today. Check back later or visit your doctor for prescriptions.</p>';
+        return;
+    }
+    
+    // Group medications by time period
+    const timeSlots = {
+        'Morning': { icon: '🌅', meds: [] },
+        'Afternoon': { icon: '☀️', meds: [] },
+        'Evening': { icon: '🌆', meds: [] },
+        'Night': { icon: '🌙', meds: [] }
+    };
+    
+    // Organize medications into time slots
+    medications.forEach(med => {
+        // reminder_times is already parsed by the server
+        const reminderTimes = Array.isArray(med.reminder_times) ? med.reminder_times : [];
+        reminderTimes.forEach(time => {
+            const [hours] = time.split(':').map(Number);
+            let period = 'Morning';
+            if (hours >= 5 && hours < 12) period = 'Morning';
+            else if (hours >= 12 && hours < 17) period = 'Afternoon';
+            else if (hours >= 17 && hours < 21) period = 'Evening';
+            else period = 'Night';
+            
+            timeSlots[period].meds.push({ ...med, scheduleTime: time });
+        });
+    });
+    
+    // Calculate progress
+    const totalDoses = medications.reduce((sum, med) => {
+        const times = Array.isArray(med.reminder_times) ? med.reminder_times : [];
+        return sum + times.length;
+    }, 0);
+    const takenDoses = medications.filter(med => med.today_status === 'taken').length;
+    const progressPercent = totalDoses > 0 ? Math.round((takenDoses / totalDoses) * 100) : 0;
+    
+    let html = `
+        <div class="medication-progress">
+            <div class="progress-header">
+                <span>💊 Today's Progress</span>
+                <span class="progress-text">${takenDoses} of ${totalDoses} doses taken</span>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: ${progressPercent}%"></div>
+            </div>
+        </div>
+    `;
+    
+    // Render each time period
+    for (const [period, data] of Object.entries(timeSlots)) {
+        if (data.meds.length === 0) continue;
+        
+        html += `
+            <div class="time-period-section">
+                <div class="time-period-header">
+                    <span class="time-period-icon">${data.icon}</span>
+                    <span class="time-period-label">${period}</span>
+                </div>
+                <div class="time-period-medications">
+        `;
+        
+        data.meds.forEach(med => {
+            const isTaken = med.today_status === 'taken';
+            const statusClass = isTaken ? 'taken' : 'pending';
+            const now = new Date();
+            const [schedHours, schedMins] = med.scheduleTime.split(':').map(Number);
+            const scheduleMinutes = schedHours * 60 + schedMins;
+            const currentMinutes = now.getHours() * 60 + now.getMinutes();
+            const isOverdue = !isTaken && currentMinutes > scheduleMinutes + 30;
+            
+            html += `
+                <div class="medication-item ${statusClass} ${isOverdue ? 'overdue' : ''}">
+                    <div class="medication-time-badge">
+                        <span class="time">${med.scheduleTime}</span>
+                    </div>
+                    <div class="medication-info">
+                        <div class="medication-name">${med.medicine_name}</div>
+                        <div class="medication-dosage-text">${med.dosage || ''} ${med.timing ? '• ' + med.timing : ''}</div>
+                    </div>
+                    <div class="medication-action">
+                        ${isTaken ? 
+                            '<span class="taken-badge">✓ Taken</span>' :
+                            `<button class="btn-take-med" onclick="markMedicationTaken(${med.id}, '${med.scheduleTime}', '${med.medicine_name.replace(/'/g, "\\'")}')">Take</button>`
+                        }
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+}
+
+// Display today's activities
+function displayTodaysActivities(activities) {
+    const container = document.getElementById('todaysActivities');
+    
+    if (!activities || activities.length === 0) {
+        container.innerHTML = '<p class="empty-state">No activity recommendations today. Check back later or visit your doctor.</p>';
+        return;
+    }
+    
+    container.innerHTML = activities.map(activity => {
+        // reminder_times is already parsed by the server
+        const reminderTimes = Array.isArray(activity.reminder_times) ? activity.reminder_times : [];
+        const status = activity.today_status === 'completed' ? 'completed' : 'pending';
+        
+        return `
+            <div class="activity-card">
+                <div class="activity-header">
+                    <h4>${activity.activity_name}</h4>
+                    <span class="activity-frequency">${activity.frequency || 'Frequency not specified'}</span>
+                </div>
+                <div class="activity-details">
+                    <p><strong>Duration:</strong> ${activity.duration || 'Not specified'} minutes</p>
+                    <p><strong>Instructions:</strong> ${activity.instructions || 'No specific instructions'}</p>
+                </div>
+                <div class="activity-times">
+                    <p><strong>Reminders:</strong> ${reminderTimes.join(', ') || 'No specific times'}</p>
+                </div>
+                <div class="activity-actions">
+                    <button class="btn-activity ${status}" 
+                            onclick="markActivityCompleted(${activity.id}, '${activity.activity_name}')">
+                        ${status === 'completed' ? 'Completed ✓' : 'Mark Completed'}
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// Mark medication as taken
+async function markMedicationTaken(trackingId, scheduledTime, medicineName) {
+    try {
+        const response = await fetch(`/api/medication/${trackingId}/log`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                scheduledTime: scheduledTime,
+                status: 'taken',
+                notes: `Taken ${medicineName}`
+            })
+        });
+        
+        if (response.ok) {
+            // Reload the medication list to update status
+            const patientId = getCurrentUserId();
+            loadPatientMedicationTracking(patientId);
+            alert(`${medicineName} marked as taken!`);
+        } else {
+            throw new Error('Failed to log medication');
+        }
+    } catch (error) {
+        console.error('Error marking medication as taken:', error);
+        alert('Error marking medication as taken. Please try again.');
+    }
+}
+
+// Mark activity as completed
+async function markActivityCompleted(trackingId, activityName) {
+    try {
+        const response = await fetch(`/api/activity/${trackingId}/log`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                status: 'completed',
+                notes: `Completed ${activityName}`
+            })
+        });
+        
+        if (response.ok) {
+            // Reload the activity list to update status
+            const patientId = getCurrentUserId();
+            loadPatientMedicationTracking(patientId);
+            alert(`${activityName} marked as completed!`);
+        } else {
+            throw new Error('Failed to log activity');
+        }
+    } catch (error) {
+        console.error('Error marking activity as completed:', error);
+        alert('Error marking activity as completed. Please try again.');
+    }
 }
 
 function displayExtractedConditions(patientData) {
@@ -2170,12 +2396,20 @@ function displayPatientPrescriptions(patientData) {
         return;
     }
     
-    container.innerHTML = patientData.prescriptions.map(prescription => `
+    // Also display follow-up reminders
+    displayFollowUpReminders(patientData.prescriptions);
+    
+    container.innerHTML = patientData.prescriptions.map((prescription, index) => `
         <div class="prescription-item">
             <div class="prescription-date">
                 Prescribed by: ${prescription.doctorId} on ${new Date(prescription.date).toLocaleString()}
             </div>
             <div class="prescription-content">${prescription.content}</div>
+            ${prescription.followUp ? `
+                <div style="margin-top: var(--spacing-sm); padding: var(--spacing-sm); background-color: #e0f2fe; border-radius: var(--radius-sm); font-size: var(--font-size-small);">
+                    <strong>📅 Follow-up:</strong> ${prescription.followUp}
+                </div>
+            ` : ''}
             ${prescription.warnings ? `
                 <div style="margin-top: var(--spacing-sm); padding: var(--spacing-sm); background-color: #fef3c7; border-radius: var(--radius-sm); font-size: var(--font-size-small);">
                     <strong>⚠️ Doctor's Notes:</strong> ${prescription.doctorNotes || 'Warnings were acknowledged by the doctor.'}
@@ -2183,6 +2417,10 @@ function displayPatientPrescriptions(patientData) {
             ` : ''}
         </div>
     `).join('');
+    
+    // Store prescriptions for printing
+    window.patientPrescriptions = patientData.prescriptions;
+    window.patientInfo = { name: patientData.name, age: patientData.age, gender: patientData.gender, id: patientData.id };
 }
 
 // ============================================
@@ -2741,6 +2979,10 @@ function displayPatientPrescriptionHistory(patientData) {
         return;
     }
     
+    // Store prescriptions and patient info for printing
+    window.doctorViewPrescriptions = patientData.prescriptions;
+    window.doctorViewPatientInfo = { name: patientData.name, age: patientData.age, gender: patientData.gender, id: patientData.id };
+    
     container.innerHTML = '<div style="display: flex; flex-direction: column; gap: var(--spacing-md);">' +
         patientData.prescriptions.map((prescription, index) => {
             const prescriptionDate = new Date(prescription.date);
@@ -2761,9 +3003,14 @@ function displayPatientPrescriptionHistory(patientData) {
                                 Prescribed by: ${prescription.doctorId}
                             </div>
                         </div>
-                        <span style="font-size: var(--font-size-small); color: var(--color-text-light); white-space: nowrap;">
-                            ${formattedDate}
-                        </span>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <span style="font-size: var(--font-size-small); color: var(--color-text-light); white-space: nowrap;">
+                                ${formattedDate}
+                            </span>
+                            <button class="btn-print" onclick="printPrescriptionDoctor(${index})">
+                                🖨️ Print
+                            </button>
+                        </div>
                     </div>
                     
                     <div style="background-color: white; padding: var(--spacing-sm); border-radius: var(--radius-sm); font-family: monospace; font-size: var(--font-size-small); white-space: pre-wrap; margin-top: var(--spacing-sm);">
@@ -4005,22 +4252,292 @@ async function savePrescription() {
 
     try {
         await savePatientPrescription(currentPatientId, prescriptionData);
+        
+        // Create medication tracking records
+        await createMedicationTracking(currentPatientId, prescriptionData);
+        
         const refreshed = await fetchPatientData(currentPatientId);
         // Refresh prescription history panel (doctor view)
         displayPatientPrescriptionHistory(refreshed);
+        
+        // Store latest prescription for immediate printing
+        window.lastSavedPrescription = prescriptionData;
+        window.lastSavedPatientInfo = { 
+            name: patientData.name, 
+            age: patientData.age, 
+            gender: patientData.gender, 
+            id: currentPatientId 
+        };
     } catch (e) {
         alert('Failed to save prescription to the database. Please try again.');
         return;
     }
 
-    // Show success message
-    document.getElementById('successMessage').classList.remove('hidden');
+    // Show success message with print option
+    const successMsg = document.getElementById('successMessage');
+    successMsg.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span>✓ Prescription saved successfully! Patient can now view it in their portal.</span>
+            <button class="btn-print" onclick="printLastPrescription()" style="margin-left: 12px;">
+                🖨️ Print Now
+            </button>
+        </div>
+    `;
+    successMsg.classList.remove('hidden');
     
-    // Clear form
+    // Clear form after delay
     setTimeout(() => {
         clearPrescription();
-        document.getElementById('successMessage').classList.add('hidden');
-    }, 3000);
+        successMsg.classList.add('hidden');
+    }, 5000);
+}
+
+// Create medication tracking records from prescription
+async function createMedicationTracking(patientId, prescriptionData) {
+    try {
+        // Get the prescription ID that was just created
+        const patientData = await fetchPatientData(patientId);
+        const latestPrescription = patientData.prescriptions[0]; // Most recent
+        const prescriptionId = latestPrescription.id;
+        
+        // Create tracking records for each medicine
+        for (const medicine of prescriptionData.medicines) {
+            const trackingData = {
+                patient_id: patientId,
+                prescription_id: prescriptionId,
+                medicine_name: medicine.name,
+                dosage: medicine.dosage,
+                frequency: medicine.frequency,
+                duration: parseDurationDays(medicine.duration),
+                timing: medicine.timing,
+                schedule_type: determineScheduleType(medicine.frequency),
+                schedule_days: determineScheduleDays(medicine.frequency),
+                reminder_times: determineReminderTimes(medicine.frequency, medicine.timing),
+                start_date: new Date().toISOString().split('T')[0],
+                end_date: calculateEndDate(new Date(), parseDurationDays(medicine.duration)),
+                created_at: new Date().toISOString()
+            };
+            
+            await saveMedicationTracking(trackingData);
+        }
+        
+        // Parse and create activity tracking from general instructions
+        await createActivityTracking(patientId, prescriptionId, prescriptionData.generalInstructions);
+        
+    } catch (error) {
+        console.error('Error creating medication tracking:', error);
+    }
+}
+
+// Parse duration string to days
+function parseDurationDays(durationStr) {
+    if (!durationStr) return 7; // Default 7 days
+    
+    const match = durationStr.match(/(\d+)\s*(days?|weeks?|months?)/i);
+    if (!match) return 7;
+    
+    const number = parseInt(match[1]);
+    const unit = match[2].toLowerCase();
+    
+    switch (unit) {
+        case 'day':
+        case 'days':
+            return number;
+        case 'week':
+        case 'weeks':
+            return number * 7;
+        case 'month':
+        case 'months':
+            return number * 30;
+        default:
+            return 7;
+    }
+}
+
+// Determine schedule type from frequency
+function determineScheduleType(frequency) {
+    if (!frequency) return 'daily';
+    
+    const freq = frequency.toLowerCase();
+    if (freq.includes('as needed') || freq.includes('sos')) {
+        return 'as_needed';
+    } else if (freq.includes('monday') || freq.includes('tuesday') || freq.includes('wednesday') || 
+               freq.includes('thursday') || freq.includes('friday') || freq.includes('saturday') || 
+               freq.includes('sunday')) {
+        return 'specific_days';
+    } else {
+        return 'daily';
+    }
+}
+
+// Determine schedule days from frequency
+function determineScheduleDays(frequency) {
+    if (!frequency) return [];
+    
+    const freq = frequency.toLowerCase();
+    const days = [];
+    
+    if (freq.includes('monday') || freq.includes('daily') || freq.includes('every day')) days.push('Monday');
+    if (freq.includes('tuesday') || freq.includes('daily') || freq.includes('every day')) days.push('Tuesday');
+    if (freq.includes('wednesday') || freq.includes('daily') || freq.includes('every day')) days.push('Wednesday');
+    if (freq.includes('thursday') || freq.includes('daily') || freq.includes('every day')) days.push('Thursday');
+    if (freq.includes('friday') || freq.includes('daily') || freq.includes('every day')) days.push('Friday');
+    if (freq.includes('saturday') || freq.includes('daily') || freq.includes('every day')) days.push('Saturday');
+    if (freq.includes('sunday') || freq.includes('daily') || freq.includes('every day')) days.push('Sunday');
+    
+    return [...new Set(days)]; // Remove duplicates
+}
+
+// Determine reminder times from frequency and timing
+function determineReminderTimes(frequency, timing) {
+    if (!frequency) return ['08:00'];
+    
+    const freq = frequency.toLowerCase();
+    const times = [];
+    
+    // Default times based on frequency
+    if (freq.includes('once daily') || freq.includes('once a day')) {
+        times.push('08:00');
+    } else if (freq.includes('twice daily') || freq.includes('two times')) {
+        times.push('08:00', '20:00');
+    } else if (freq.includes('three times daily') || freq.includes('thrice')) {
+        times.push('08:00', '14:00', '20:00');
+    } else if (freq.includes('four times daily')) {
+        times.push('08:00', '12:00', '16:00', '20:00');
+    } else if (freq.includes('morning and night')) {
+        times.push('08:00', '20:00');
+    } else if (freq.includes('morning')) {
+        times.push('08:00');
+    } else if (freq.includes('evening') || freq.includes('night')) {
+        times.push('20:00');
+    } else {
+        // Default to morning time
+        times.push('08:00');
+    }
+    
+    return times;
+}
+
+// Calculate end date
+function calculateEndDate(startDate, durationDays) {
+    const endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + durationDays);
+    return endDate.toISOString().split('T')[0];
+}
+
+// Save medication tracking record
+async function saveMedicationTracking(trackingData) {
+    try {
+        const response = await fetch(`/api/medication-tracking`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(trackingData)
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to save medication tracking');
+        }
+        
+        return await response.json();
+    } catch (error) {
+        console.error('Error saving medication tracking:', error);
+        throw error;
+    }
+}
+
+// Create activity tracking from general instructions
+async function createActivityTracking(patientId, prescriptionId, instructions) {
+    if (!instructions) return;
+    
+    // Look for exercise/activity related keywords
+    const activityKeywords = ['exercise', 'workout', 'walk', 'jog', 'running', 'swimming', 
+                             'yoga', 'stretching', 'physical therapy', 'physiotherapy',
+                             'gym', 'fitness', 'activity', 'movement'];
+    
+    const instructionLines = instructions.split(/[.\n]/).filter(line => line.trim());
+    
+    for (const line of instructionLines) {
+        const lowerLine = line.toLowerCase();
+        const hasActivity = activityKeywords.some(keyword => lowerLine.includes(keyword));
+        
+        if (hasActivity) {
+            const activityData = {
+                patient_id: patientId,
+                prescription_id: prescriptionId,
+                activity_name: extractActivityName(line),
+                frequency: extractActivityFrequency(line),
+                duration: extractActivityDuration(line),
+                instructions: line.trim(),
+                reminder_times: ['09:00'], // Default reminder time
+                start_date: new Date().toISOString().split('T')[0],
+                end_date: calculateEndDate(new Date(), 30), // Default 30 days
+                created_at: new Date().toISOString()
+            };
+            
+            try {
+                await saveActivityTracking(activityData);
+            } catch (error) {
+                console.error('Error saving activity tracking:', error);
+            }
+        }
+    }
+}
+
+// Extract activity name from instruction line
+function extractActivityName(instructionLine) {
+    const activityNames = ['walking', 'jogging', 'running', 'swimming', 'yoga', 'stretching', 
+                          'exercise', 'workout', 'physical therapy', 'gym workout'];
+    
+    for (const name of activityNames) {
+        if (instructionLine.toLowerCase().includes(name)) {
+            return name.charAt(0).toUpperCase() + name.slice(1);
+        }
+    }
+    
+    return 'Daily Exercise';
+}
+
+// Extract activity frequency
+function extractActivityFrequency(instructionLine) {
+    if (instructionLine.toLowerCase().includes('daily')) return 'Daily';
+    if (instructionLine.toLowerCase().includes('every day')) return 'Daily';
+    if (instructionLine.toLowerCase().includes('twice daily')) return 'Twice daily';
+    return 'Daily'; // Default
+}
+
+// Extract activity duration
+function extractActivityDuration(instructionLine) {
+    const match = instructionLine.match(/(\d+)\s*(minutes?|mins?|hours?)/i);
+    if (match) {
+        const number = parseInt(match[1]);
+        const unit = match[2].toLowerCase();
+        return unit.startsWith('hour') ? number * 60 : number;
+    }
+    return 30; // Default 30 minutes
+}
+
+// Save activity tracking record
+async function saveActivityTracking(activityData) {
+    try {
+        const response = await fetch(`/api/activity-tracking`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(activityData)
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to save activity tracking');
+        }
+        
+        return await response.json();
+    } catch (error) {
+        console.error('Error saving activity tracking:', error);
+        throw error;
+    }
 }
 
 function clearPrescription() {
@@ -4138,4 +4655,763 @@ function handleFieldSpeechEnd() {
         statusElement.textContent = '';
     }
     currentFieldId = null;
+}
+
+// ============================================
+// PATIENT DETAILS MANAGEMENT
+// ============================================
+
+// Save patient details (from patient portal - immutable after first save)
+async function savePatientDetails() {
+    const patientId = getCurrentUserId();
+    if (!patientId) {
+        alert('Please log in first');
+        return;
+    }
+    
+    const name = document.getElementById('patientName').value.trim();
+    const age = document.getElementById('patientAge').value.trim();
+    const gender = document.getElementById('patientGender').value;
+    const blood_group = document.getElementById('patientBloodGroup').value;
+    const weight = document.getElementById('patientWeight').value.trim();
+    const height = document.getElementById('patientHeight').value.trim();
+    
+    if (!name || !age || !gender) {
+        alert('Please fill in all required fields (Name, Age, and Gender)');
+        return;
+    }
+    
+    try {
+        await savePatient(patientId, { name, age, gender, blood_group, weight, height });
+        
+        // Lock the fields after saving
+        lockPatientDetailsForm();
+        
+        // Show success message
+        document.getElementById('detailsSavedMessage').classList.remove('hidden');
+        document.getElementById('detailsInfoText').textContent = 'Your information has been saved and cannot be changed.';
+        
+    } catch (e) {
+        alert('Failed to save your details. Please try again.');
+    }
+}
+
+// Lock patient details form (make fields readonly)
+function lockPatientDetailsForm() {
+    const nameField = document.getElementById('patientName');
+    const ageField = document.getElementById('patientAge');
+    const genderField = document.getElementById('patientGender');
+    const bloodGroupField = document.getElementById('patientBloodGroup');
+    const weightField = document.getElementById('patientWeight');
+    const heightField = document.getElementById('patientHeight');
+    const saveBtn = document.getElementById('saveDetailsBtn');
+    
+    if (nameField) {
+        nameField.readOnly = true;
+        nameField.style.backgroundColor = '#f3f4f6';
+        nameField.style.cursor = 'not-allowed';
+    }
+    if (ageField) {
+        ageField.readOnly = true;
+        ageField.style.backgroundColor = '#f3f4f6';
+        ageField.style.cursor = 'not-allowed';
+    }
+    if (genderField) {
+        genderField.disabled = true;
+        genderField.style.backgroundColor = '#f3f4f6';
+        genderField.style.cursor = 'not-allowed';
+    }
+    if (bloodGroupField) {
+        bloodGroupField.disabled = true;
+        bloodGroupField.style.backgroundColor = '#f3f4f6';
+        bloodGroupField.style.cursor = 'not-allowed';
+    }
+    if (weightField) {
+        weightField.readOnly = true;
+        weightField.style.backgroundColor = '#f3f4f6';
+        weightField.style.cursor = 'not-allowed';
+    }
+    if (heightField) {
+        heightField.readOnly = true;
+        heightField.style.backgroundColor = '#f3f4f6';
+        heightField.style.cursor = 'not-allowed';
+    }
+    if (saveBtn) {
+        saveBtn.style.display = 'none';
+    }
+}
+
+// Load and display patient details form
+function loadPatientDetailsForm(patientData) {
+    const nameField = document.getElementById('patientName');
+    const ageField = document.getElementById('patientAge');
+    const genderField = document.getElementById('patientGender');
+    const bloodGroupField = document.getElementById('patientBloodGroup');
+    const weightField = document.getElementById('patientWeight');
+    const heightField = document.getElementById('patientHeight');
+    
+    if (nameField) nameField.value = patientData.name || '';
+    if (ageField) ageField.value = patientData.age || '';
+    if (genderField) genderField.value = patientData.gender || '';
+    if (bloodGroupField) bloodGroupField.value = patientData.blood_group || '';
+    if (weightField) weightField.value = patientData.weight || '';
+    if (heightField) heightField.value = patientData.height || '';
+    
+    // If details are already filled, lock the form
+    if (patientData.name && patientData.age && patientData.gender) {
+        lockPatientDetailsForm();
+        document.getElementById('detailsInfoText').textContent = 'Your information has been saved and cannot be changed.';
+        document.getElementById('detailsSavedMessage').classList.remove('hidden');
+    }
+}
+
+// ============================================
+// FOLLOW-UP REMINDER SYSTEM
+// ============================================
+
+// Parse follow-up text to extract date
+function parseFollowUpDate(followUpText) {
+    if (!followUpText) return null;
+    
+    const text = followUpText.toLowerCase();
+    const today = new Date();
+    
+    // Try to parse patterns like "after 3 days", "in 5 days", "3 days"
+    const daysMatch = text.match(/(\d+)\s*days?/i);
+    if (daysMatch) {
+        const days = parseInt(daysMatch[1]);
+        const followUpDate = new Date(today);
+        followUpDate.setDate(followUpDate.getDate() + days);
+        return followUpDate;
+    }
+    
+    // Try to parse patterns like "after 1 week", "2 weeks"
+    const weeksMatch = text.match(/(\d+)\s*weeks?/i);
+    if (weeksMatch) {
+        const weeks = parseInt(weeksMatch[1]);
+        const followUpDate = new Date(today);
+        followUpDate.setDate(followUpDate.getDate() + (weeks * 7));
+        return followUpDate;
+    }
+    
+    // Try to parse specific date formats
+    const dateMatch = text.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-]?(\d{2,4})?/);
+    if (dateMatch) {
+        const day = parseInt(dateMatch[1]);
+        const month = parseInt(dateMatch[2]) - 1;
+        const year = dateMatch[3] ? parseInt(dateMatch[3]) : today.getFullYear();
+        return new Date(year < 100 ? 2000 + year : year, month, day);
+    }
+    
+    return null;
+}
+
+// Display follow-up reminders
+function displayFollowUpReminders(prescriptions) {
+    const container = document.getElementById('followUpReminders');
+    if (!container) return;
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const upcomingFollowUps = [];
+    
+    prescriptions.forEach((prescription, index) => {
+        if (prescription.followUp) {
+            const followUpDate = parseFollowUpDate(prescription.followUp);
+            if (followUpDate) {
+                const diffDays = Math.ceil((followUpDate - today) / (1000 * 60 * 60 * 24));
+                if (diffDays >= 0) {
+                    upcomingFollowUps.push({
+                        date: followUpDate,
+                        diffDays,
+                        text: prescription.followUp,
+                        doctorId: prescription.doctorId,
+                        prescriptionDate: prescription.date
+                    });
+                }
+            }
+        }
+    });
+    
+    if (upcomingFollowUps.length === 0) {
+        container.innerHTML = '<p class="empty-state">No upcoming follow-ups scheduled.</p>';
+        return;
+    }
+    
+    // Sort by date
+    upcomingFollowUps.sort((a, b) => a.date - b.date);
+    
+    container.innerHTML = upcomingFollowUps.map(followUp => {
+        const isToday = followUp.diffDays === 0;
+        const isTomorrow = followUp.diffDays === 1;
+        const urgencyClass = isToday ? 'urgent' : (followUp.diffDays <= 3 ? 'soon' : '');
+        
+        let dateText = followUp.date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        if (isToday) dateText = '🚨 TODAY';
+        else if (isTomorrow) dateText = 'Tomorrow';
+        
+        return `
+            <div class="follow-up-card ${urgencyClass}">
+                <div class="follow-up-date">
+                    <span class="date-badge">${dateText}</span>
+                    <span class="days-away">${isToday ? '' : `in ${followUp.diffDays} days`}</span>
+                </div>
+                <div class="follow-up-details">
+                    <p><strong>Doctor:</strong> ${followUp.doctorId}</p>
+                    <p><strong>Instructions:</strong> ${followUp.text}</p>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// Check for follow-up reminders (for notifications)
+function checkFollowUpReminders(prescriptions) {
+    if (notificationPermission !== 'granted') return;
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = today.toDateString();
+    
+    prescriptions.forEach(prescription => {
+        if (prescription.followUp) {
+            const followUpDate = parseFollowUpDate(prescription.followUp);
+            if (followUpDate) {
+                followUpDate.setHours(0, 0, 0, 0);
+                
+                if (followUpDate.toDateString() === todayStr) {
+                    const reminderKey = `followup-${prescription.date}-${todayStr}`;
+                    if (!notifiedReminders.has(reminderKey)) {
+                        showFollowUpNotification(prescription.doctorId, prescription.followUp);
+                        notifiedReminders.add(reminderKey);
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Show follow-up notification
+function showFollowUpNotification(doctorId, followUpText) {
+    if (notificationPermission !== 'granted') return;
+    
+    const notification = new Notification('📅 Follow-up Reminder - DigiRx', {
+        body: `Today is your follow-up day! Doctor: ${doctorId}. ${followUpText}`,
+        icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">📅</text></svg>',
+        tag: `followup-${Date.now()}`,
+        requireInteraction: true
+    });
+    
+    notification.onclick = function() {
+        window.focus();
+        notification.close();
+    };
+    
+    setTimeout(() => notification.close(), 60000);
+}
+
+// ============================================
+// PRESCRIPTION PRINTING
+// ============================================
+
+// Print prescription from patient view
+function printPrescription(prescriptionIndex) {
+    const prescription = window.patientPrescriptions[prescriptionIndex];
+    const patientInfo = window.patientInfo;
+    
+    if (!prescription) {
+        alert('Prescription not found');
+        return;
+    }
+    
+    printPrescriptionTemplate(prescription, patientInfo);
+}
+
+// Print the last saved prescription (immediately after saving)
+function printLastPrescription() {
+    const prescription = window.lastSavedPrescription;
+    const patientInfo = window.lastSavedPatientInfo;
+    
+    if (!prescription) {
+        alert('No prescription to print');
+        return;
+    }
+    
+    printPrescriptionTemplate(prescription, patientInfo);
+}
+
+// Print prescription from doctor view
+function printPrescriptionDoctor(prescriptionIndex) {
+    const prescription = window.doctorViewPrescriptions[prescriptionIndex];
+    const patientInfo = window.doctorViewPatientInfo;
+    
+    if (!prescription) {
+        alert('Prescription not found');
+        return;
+    }
+    
+    printPrescriptionTemplate(prescription, patientInfo);
+}
+
+// Shared prescription print template
+function printPrescriptionTemplate(prescription, patientInfo) {
+    if (!prescription || !patientInfo) {
+        alert('Prescription data not found');
+        return;
+    }
+    
+    // Create print window
+    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    
+    // Generate medicines list HTML
+    let medicinesHtml = '';
+    if (prescription.medicines && prescription.medicines.length > 0) {
+        medicinesHtml = prescription.medicines.map((med, i) => `
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${i + 1}</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">
+                    <strong>${med.name || med.molecule || med.brand}</strong>
+                    ${med.diagnosis ? `<br><small style="color: #6b7280;">For: ${med.diagnosis}</small>` : ''}
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${med.dosage || '-'}</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${med.frequency || '-'}</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${med.duration || '-'}</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${med.timing || '-'}</td>
+            </tr>
+        `).join('');
+    }
+    
+    const prescriptionDate = new Date(prescription.date).toLocaleDateString('en-US', {
+        year: 'numeric', month: 'long', day: 'numeric'
+    });
+    
+    const printContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Prescription - ${patientInfo.name || patientInfo.id}</title>
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { 
+                    font-family: 'Times New Roman', serif; 
+                    padding: 20px; 
+                    max-width: 800px; 
+                    margin: auto;
+                    font-size: 14px;
+                    line-height: 1.5;
+                }
+                .header {
+                    text-align: center;
+                    border-bottom: 3px double #1d4ed8;
+                    padding-bottom: 15px;
+                    margin-bottom: 20px;
+                }
+                .hospital-name {
+                    font-size: 24px;
+                    font-weight: bold;
+                    color: #1d4ed8;
+                    margin-bottom: 5px;
+                }
+                .hospital-tagline {
+                    font-size: 12px;
+                    color: #6b7280;
+                }
+                .rx-symbol {
+                    font-size: 36px;
+                    color: #1d4ed8;
+                    font-weight: bold;
+                    margin: 10px 0;
+                }
+                .patient-info {
+                    display: flex;
+                    justify-content: space-between;
+                    margin-bottom: 20px;
+                    padding: 10px;
+                    background: #f8fafc;
+                    border-radius: 5px;
+                }
+                .patient-info div { flex: 1; }
+                .section-title {
+                    font-weight: bold;
+                    color: #1d4ed8;
+                    border-bottom: 1px solid #1d4ed8;
+                    padding-bottom: 5px;
+                    margin: 15px 0 10px;
+                }
+                table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-bottom: 20px;
+                }
+                th {
+                    background: #1d4ed8;
+                    color: white;
+                    padding: 10px;
+                    text-align: left;
+                    font-size: 12px;
+                }
+                .instructions {
+                    background: #f0f9ff;
+                    padding: 15px;
+                    border-radius: 5px;
+                    margin-bottom: 20px;
+                }
+                .instructions p { margin-bottom: 8px; }
+                .signature-section {
+                    margin-top: 40px;
+                    display: flex;
+                    justify-content: space-between;
+                }
+                .signature-box {
+                    width: 200px;
+                    text-align: center;
+                }
+                .signature-line {
+                    border-top: 1px solid #000;
+                    margin-top: 60px;
+                    padding-top: 5px;
+                }
+                .footer {
+                    margin-top: 30px;
+                    text-align: center;
+                    font-size: 11px;
+                    color: #6b7280;
+                    border-top: 1px solid #e5e7eb;
+                    padding-top: 10px;
+                }
+                @media print {
+                    body { padding: 0; }
+                    .no-print { display: none; }
+                }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <div class="hospital-name">DigiRx Healthcare</div>
+                <div class="hospital-tagline">Digital Prescription System for Rural Healthcare</div>
+                <div class="rx-symbol">℞</div>
+            </div>
+            
+            <div class="patient-info">
+                <div>
+                    <strong>Patient ID:</strong> ${patientInfo.id}<br>
+                    <strong>Name:</strong> ${patientInfo.name || 'Not provided'}<br>
+                    <strong>Age/Gender:</strong> ${patientInfo.age || '-'} yrs / ${patientInfo.gender || '-'}<br>
+                    <strong>Blood Group:</strong> ${patientInfo.blood_group || '-'} | 
+                    <strong>Weight:</strong> ${patientInfo.weight ? patientInfo.weight + ' kg' : '-'} | 
+                    <strong>Height:</strong> ${patientInfo.height ? patientInfo.height + ' cm' : '-'}
+                </div>
+                <div style="text-align: right;">
+                    <strong>Date:</strong> ${prescriptionDate}<br>
+                    <strong>Doctor ID:</strong> ${prescription.doctorId}
+                </div>
+            </div>
+            
+            <div class="section-title">PRESCRIPTION</div>
+            
+            ${medicinesHtml ? `
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 30px;">#</th>
+                            <th>Medicine</th>
+                            <th style="width: 80px;">Dosage</th>
+                            <th style="width: 100px;">Frequency</th>
+                            <th style="width: 80px;">Duration</th>
+                            <th style="width: 100px;">Timing</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${medicinesHtml}
+                    </tbody>
+                </table>
+            ` : `<pre style="background: #f8fafc; padding: 15px; border-radius: 5px; white-space: pre-wrap;">${prescription.content}</pre>`}
+            
+            ${(prescription.dietaryAdvice || prescription.generalInstructions || prescription.followUp) ? `
+                <div class="instructions">
+                    <div class="section-title" style="margin-top: 0;">INSTRUCTIONS</div>
+                    ${prescription.dietaryAdvice ? `<p><strong>Dietary Advice:</strong> ${prescription.dietaryAdvice}</p>` : ''}
+                    ${prescription.generalInstructions ? `<p><strong>General Instructions:</strong> ${prescription.generalInstructions}</p>` : ''}
+                    ${prescription.followUp ? `<p><strong>Follow-up:</strong> ${prescription.followUp}</p>` : ''}
+                </div>
+            ` : ''}
+            
+            ${prescription.warnings ? `
+                <div style="background: #fef3c7; padding: 10px; border-radius: 5px; margin-bottom: 20px;">
+                    <strong>⚠️ Important Notes:</strong> ${prescription.doctorNotes || 'Please follow dosage instructions carefully.'}
+                </div>
+            ` : ''}
+            
+            <div class="signature-section">
+                <div class="signature-box">
+                    <div class="signature-line">Patient's Signature</div>
+                </div>
+                <div class="signature-box">
+                    <div class="signature-line">Doctor's Signature & Stamp</div>
+                </div>
+            </div>
+            
+            <div class="footer">
+                <p>This is a computer-generated prescription from DigiRx Digital Healthcare System</p>
+                <p>Generated on: ${new Date().toLocaleString()}</p>
+            </div>
+            
+            <div class="no-print" style="text-align: center; margin-top: 20px;">
+                <button onclick="window.print()" style="padding: 10px 30px; font-size: 16px; background: #1d4ed8; color: white; border: none; border-radius: 5px; cursor: pointer;">
+                    🖨️ Print Prescription
+                </button>
+            </div>
+        </body>
+        </html>
+    `;
+    
+    printWindow.document.write(printContent);
+    printWindow.document.close();
+}
+
+// ============================================
+// MEDICATION REMINDER NOTIFICATION SYSTEM
+// ============================================
+
+let notificationPermission = 'default';
+let reminderCheckInterval = null;
+let notifiedReminders = new Set(); // Track already notified reminders to avoid duplicates
+
+// Request notification permission
+async function requestNotificationPermission() {
+    if (!('Notification' in window)) {
+        console.log('Browser does not support notifications');
+        return false;
+    }
+    
+    if (Notification.permission === 'granted') {
+        notificationPermission = 'granted';
+        return true;
+    }
+    
+    if (Notification.permission !== 'denied') {
+        const permission = await Notification.requestPermission();
+        notificationPermission = permission;
+        return permission === 'granted';
+    }
+    
+    return false;
+}
+
+// Show notification for medication reminder
+function showMedicationNotification(medicineName, dosage, timing) {
+    if (notificationPermission !== 'granted') return;
+    
+    const notification = new Notification('💊 Medication Reminder - DigiRx', {
+        body: `Time to take ${medicineName}${dosage ? ' (' + dosage + ')' : ''}${timing ? ' - ' + timing : ''}`,
+        icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">💊</text></svg>',
+        tag: `med-${medicineName}-${Date.now()}`,
+        requireInteraction: true
+    });
+    
+    notification.onclick = function() {
+        window.focus();
+        notification.close();
+    };
+    
+    // Auto close after 30 seconds
+    setTimeout(() => notification.close(), 30000);
+}
+
+// Show notification for activity reminder
+function showActivityNotification(activityName, duration) {
+    if (notificationPermission !== 'granted') return;
+    
+    const notification = new Notification('🏃 Activity Reminder - DigiRx', {
+        body: `Time for ${activityName}${duration ? ' (' + duration + ' minutes)' : ''}`,
+        icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🏃</text></svg>',
+        tag: `activity-${activityName}-${Date.now()}`,
+        requireInteraction: true
+    });
+    
+    notification.onclick = function() {
+        window.focus();
+        notification.close();
+    };
+    
+    setTimeout(() => notification.close(), 30000);
+}
+
+// Check for upcoming medication reminders
+async function checkMedicationReminders() {
+    const patientId = getCurrentUserId();
+    if (!patientId || getCurrentRole() !== 'patient') return;
+    
+    try {
+        // Get today's medications
+        const medicationsResponse = await fetch(`/api/patients/${patientId}/today-medications`);
+        const medications = await medicationsResponse.json();
+        
+        // Get today's activities
+        const activitiesResponse = await fetch(`/api/patients/${patientId}/today-activities`);
+        const activities = await activitiesResponse.json();
+        
+        const now = new Date();
+        const currentTime = now.getHours() * 60 + now.getMinutes(); // Minutes since midnight
+        
+        // Check medications
+        for (const med of medications) {
+            if (med.today_status === 'taken') continue;
+            
+            // reminder_times is already parsed by the server
+            const reminderTimes = Array.isArray(med.reminder_times) ? med.reminder_times : [];
+            for (const time of reminderTimes) {
+                const [hours, minutes] = time.split(':').map(Number);
+                const reminderMinutes = hours * 60 + minutes;
+                
+                // Notify 5 minutes before and at the scheduled time
+                const diff = reminderMinutes - currentTime;
+                const reminderKey = `med-${med.id}-${time}-${now.toDateString()}`;
+                
+                if ((diff >= 0 && diff <= 5) && !notifiedReminders.has(reminderKey)) {
+                    showMedicationNotification(med.medicine_name, med.dosage, med.timing);
+                    notifiedReminders.add(reminderKey);
+                }
+            }
+        }
+        
+        // Check activities
+        for (const activity of activities) {
+            if (activity.today_status === 'completed') continue;
+            
+            // reminder_times is already parsed by the server
+            const reminderTimes = Array.isArray(activity.reminder_times) ? activity.reminder_times : [];
+            for (const time of reminderTimes) {
+                const [hours, minutes] = time.split(':').map(Number);
+                const reminderMinutes = hours * 60 + minutes;
+                
+                const diff = reminderMinutes - currentTime;
+                const reminderKey = `activity-${activity.id}-${time}-${now.toDateString()}`;
+                
+                if ((diff >= 0 && diff <= 5) && !notifiedReminders.has(reminderKey)) {
+                    showActivityNotification(activity.activity_name, activity.duration);
+                    notifiedReminders.add(reminderKey);
+                }
+            }
+        }
+        
+        // Clean up old reminder keys (from previous days)
+        const today = now.toDateString();
+        for (const key of notifiedReminders) {
+            if (!key.includes(today)) {
+                notifiedReminders.delete(key);
+            }
+        }
+        
+        // Check follow-up reminders
+        if (window.patientPrescriptions) {
+            checkFollowUpReminders(window.patientPrescriptions);
+        }
+        
+    } catch (error) {
+        console.error('Error checking medication reminders:', error);
+    }
+}
+
+// Start reminder checking (call this when patient dashboard loads)
+function startReminderChecking() {
+    // Check immediately
+    checkMedicationReminders();
+    
+    // Then check every minute
+    if (reminderCheckInterval) {
+        clearInterval(reminderCheckInterval);
+    }
+    reminderCheckInterval = setInterval(checkMedicationReminders, 60000);
+}
+
+// Stop reminder checking
+function stopReminderChecking() {
+    if (reminderCheckInterval) {
+        clearInterval(reminderCheckInterval);
+        reminderCheckInterval = null;
+    }
+}
+
+// Initialize notifications for patient dashboard
+async function initializeNotifications() {
+    const notificationBanner = document.getElementById('notificationBanner');
+    
+    if (!('Notification' in window)) {
+        if (notificationBanner) {
+            notificationBanner.innerHTML = `
+                <div class="notification-banner warning">
+                    <span>⚠️ Your browser doesn't support notifications. You won't receive medication reminders.</span>
+                </div>
+            `;
+        }
+        return;
+    }
+    
+    if (Notification.permission === 'granted') {
+        notificationPermission = 'granted';
+        startReminderChecking();
+        if (notificationBanner) {
+            notificationBanner.innerHTML = `
+                <div class="notification-banner success">
+                    <span>🔔 Medication reminders are enabled! You'll be notified when it's time to take your medicines.</span>
+                </div>
+            `;
+        }
+    } else if (Notification.permission === 'denied') {
+        if (notificationBanner) {
+            notificationBanner.innerHTML = `
+                <div class="notification-banner warning">
+                    <span>🔕 Notifications are blocked. Enable them in browser settings for medication reminders.</span>
+                </div>
+            `;
+        }
+    } else {
+        if (notificationBanner) {
+            notificationBanner.innerHTML = `
+                <div class="notification-banner info">
+                    <span>🔔 Enable notifications to receive medication reminders</span>
+                    <button class="btn-primary" onclick="enableNotifications()">Enable Reminders</button>
+                </div>
+            `;
+        }
+    }
+}
+
+// Enable notifications (called from banner button)
+async function enableNotifications() {
+    const granted = await requestNotificationPermission();
+    if (granted) {
+        startReminderChecking();
+        initializeNotifications(); // Update the banner
+    } else {
+        const notificationBanner = document.getElementById('notificationBanner');
+        if (notificationBanner) {
+            notificationBanner.innerHTML = `
+                <div class="notification-banner warning">
+                    <span>🔕 Notifications were denied. Enable them in browser settings for medication reminders.</span>
+                </div>
+            `;
+        }
+    }
+}
+
+// Get time period label from hour
+function getTimePeriod(hour) {
+    if (hour >= 5 && hour < 12) return 'Morning';
+    if (hour >= 12 && hour < 17) return 'Afternoon';
+    if (hour >= 17 && hour < 21) return 'Evening';
+    return 'Night';
+}
+
+// Get time period icon
+function getTimePeriodIcon(period) {
+    switch (period) {
+        case 'Morning': return '🌅';
+        case 'Afternoon': return '☀️';
+        case 'Evening': return '🌆';
+        case 'Night': return '🌙';
+        default: return '⏰';
+    }
 }

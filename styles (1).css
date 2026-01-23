@@ -617,6 +617,119 @@ body {
     margin-bottom: 24px;
 }
 
+/* MEDICATION TRACKING STYLES */
+.medication-card, .activity-card {
+    background: white;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.medication-header, .activity-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--color-border-light);
+    padding-bottom: 8px;
+}
+
+.medication-header h4, .activity-header h4 {
+    margin: 0;
+    color: var(--color-primary);
+    font-size: var(--font-size-medium);
+}
+
+.medication-dosage, .activity-frequency {
+    font-weight: 600;
+    color: var(--color-text);
+    font-size: var(--font-size-small);
+}
+
+.medication-details, .activity-details {
+    margin-bottom: 12px;
+}
+
+.medication-details p, .activity-details p {
+    margin: 6px 0;
+    font-size: var(--font-size-small);
+    color: var(--color-text-light);
+}
+
+.medication-times, .activity-times {
+    margin-bottom: 12px;
+    padding: 8px;
+    background-color: var(--background-light);
+    border-radius: var(--radius-sm);
+}
+
+.medication-times p, .activity-times p {
+    margin: 4px 0;
+    font-size: var(--font-size-small);
+    color: var(--color-text);
+}
+
+.medication-actions, .activity-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.btn-medication, .btn-activity {
+    padding: 8px 12px;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: var(--font-size-small);
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.btn-medication {
+    background-color: var(--color-success);
+    color: white;
+}
+
+.btn-medication:hover:not(:disabled) {
+    background-color: #16a34a;
+}
+
+.btn-medication:disabled {
+    background-color: #d1d5db;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.btn-medication.pending {
+    background-color: var(--color-warning);
+}
+
+.btn-medication.pending:hover {
+    background-color: #d97706;
+}
+
+.btn-activity {
+    background-color: var(--color-info);
+    color: white;
+}
+
+.btn-activity:hover {
+    background-color: #2563eb;
+}
+
+.btn-activity.pending {
+    background-color: var(--color-warning);
+}
+
+.btn-activity.pending:hover {
+    background-color: #d97706;
+}
+
+.btn-activity.completed {
+    background-color: var(--color-success);
+}
+
 .patient-id-section h3 {
     margin-bottom: 10px;
 }
@@ -750,4 +863,447 @@ body {
 
 .footer-note {
     margin: 0;
+}
+
+/* ============================================
+   MEDICATION REMINDER STYLES
+   ============================================ */
+
+/* Notification Banner */
+.notification-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 20px;
+    border-radius: var(--radius-md);
+    margin-bottom: 20px;
+    font-size: 14px;
+}
+
+.notification-banner.info {
+    background: var(--primary-light);
+    border: 1px solid var(--primary);
+    color: var(--primary-dark);
+}
+
+.notification-banner.success {
+    background: #d1fae5;
+    border: 1px solid var(--success);
+    color: #065f46;
+}
+
+.notification-banner.warning {
+    background: #fef3c7;
+    border: 1px solid var(--warning);
+    color: #92400e;
+}
+
+.notification-banner button {
+    white-space: nowrap;
+    padding: 8px 16px;
+    font-size: 13px;
+}
+
+/* Medication Progress */
+.medication-progress {
+    background: linear-gradient(135deg, var(--primary-light), #f0f9ff);
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+    margin-bottom: 20px;
+}
+
+.progress-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    font-weight: 600;
+    color: var(--primary-dark);
+}
+
+.progress-text {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.progress-bar {
+    height: 10px;
+    background: rgba(255, 255, 255, 0.7);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary), var(--success));
+    border-radius: 10px;
+    transition: width 0.5s ease;
+}
+
+/* Time Period Sections */
+.time-period-section {
+    margin-bottom: 20px;
+}
+
+.time-period-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 2px solid var(--border);
+    margin-bottom: 12px;
+}
+
+.time-period-icon {
+    font-size: 20px;
+}
+
+.time-period-label {
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--text-dark);
+}
+
+.time-period-medications {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* Medication Item */
+.medication-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    transition: all 0.2s ease;
+}
+
+.medication-item:hover {
+    box-shadow: var(--shadow-sm);
+}
+
+.medication-item.taken {
+    background: #f0fdf4;
+    border-color: var(--success);
+    opacity: 0.85;
+}
+
+.medication-item.overdue {
+    background: #fef2f2;
+    border-color: var(--danger);
+}
+
+.medication-time-badge {
+    min-width: 60px;
+    text-align: center;
+    padding: 6px 10px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--primary-dark);
+}
+
+.medication-item.taken .medication-time-badge {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.medication-item.overdue .medication-time-badge {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.medication-info {
+    flex: 1;
+}
+
+.medication-name {
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--text-dark);
+    margin-bottom: 2px;
+}
+
+.medication-dosage-text {
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.medication-action {
+    display: flex;
+    align-items: center;
+}
+
+.btn-take-med {
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: 8px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-take-med:hover {
+    background: var(--primary-dark);
+    transform: translateY(-1px);
+}
+
+.taken-badge {
+    background: var(--success);
+    color: white;
+    padding: 6px 14px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+/* Activity Card */
+.activity-card {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-bottom: 12px;
+}
+
+.activity-card.completed {
+    background: #f0fdf4;
+    border-color: var(--success);
+}
+
+.activity-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.activity-header h4 {
+    font-size: 16px;
+    color: var(--text-dark);
+}
+
+.activity-frequency {
+    font-size: 13px;
+    color: var(--text-muted);
+    background: var(--bg-secondary);
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+}
+
+.activity-details {
+    font-size: 14px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+}
+
+.activity-details p {
+    margin-bottom: 4px;
+}
+
+.activity-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.btn-activity {
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-activity:hover {
+    background: var(--primary-dark);
+}
+
+.btn-activity.completed {
+    background: var(--success);
+    cursor: default;
+}
+
+/* Responsive adjustments for medication items */
+@media (max-width: 480px) {
+    .medication-item {
+        flex-wrap: wrap;
+    }
+    
+    .medication-time-badge {
+        order: -1;
+    }
+    
+    .medication-info {
+        width: 100%;
+        order: 0;
+    }
+    
+    .medication-action {
+        width: 100%;
+        margin-top: 10px;
+    }
+    
+    .btn-take-med {
+        width: 100%;
+    }
+    
+    .notification-banner {
+        flex-direction: column;
+        text-align: center;
+    }
+}
+
+/* ============================================
+   PATIENT DETAILS FORM
+   ============================================ */
+
+.patient-details-form {
+    background: var(--bg-secondary);
+    padding: 20px;
+    border-radius: var(--radius-md);
+}
+
+.patient-details-form .form-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.patient-details-form .form-group label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--text-dark);
+}
+
+/* ============================================
+   FOLLOW-UP REMINDER CARDS
+   ============================================ */
+
+.follow-up-card {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-bottom: 12px;
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+}
+
+.follow-up-card.urgent {
+    background: #fef2f2;
+    border-color: var(--danger);
+    animation: pulse-urgent 2s infinite;
+}
+
+.follow-up-card.soon {
+    background: #fffbeb;
+    border-color: var(--warning);
+}
+
+@keyframes pulse-urgent {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+}
+
+.follow-up-date {
+    min-width: 100px;
+    text-align: center;
+}
+
+.date-badge {
+    display: inline-block;
+    padding: 6px 12px;
+    background: var(--primary);
+    color: white;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.follow-up-card.urgent .date-badge {
+    background: var(--danger);
+}
+
+.follow-up-card.soon .date-badge {
+    background: var(--warning);
+}
+
+.days-away {
+    display: block;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.follow-up-details {
+    flex: 1;
+}
+
+.follow-up-details p {
+    margin-bottom: 4px;
+    font-size: 14px;
+}
+
+/* ============================================
+   PRESCRIPTION HEADER & PRINT BUTTON
+   ============================================ */
+
+.prescription-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 10px;
+}
+
+.btn-print {
+    background: var(--white);
+    color: var(--primary);
+    border: 1px solid var(--primary);
+    border-radius: var(--radius-sm);
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-print:hover {
+    background: var(--primary);
+    color: white;
+}
+
+/* ============================================
+   SUCCESS MESSAGE
+   ============================================ */
+
+.success-message {
+    background: #d1fae5;
+    color: #065f46;
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    margin-top: 12px;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.success-message.hidden {
+    display: none;
 }

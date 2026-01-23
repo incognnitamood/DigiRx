@@ -41,10 +41,18 @@ function initializeDatabase() {
             name TEXT,
             age TEXT,
             gender TEXT,
+            blood_group TEXT,
+            weight TEXT,
+            height TEXT,
             conditions TEXT,
             created_at TEXT,
             updated_at TEXT
         )`);
+
+        // Add new columns to existing patients table (for existing databases)
+        db.run(`ALTER TABLE patients ADD COLUMN blood_group TEXT`, () => {});
+        db.run(`ALTER TABLE patients ADD COLUMN weight TEXT`, () => {});
+        db.run(`ALTER TABLE patients ADD COLUMN height TEXT`, () => {});
 
         // Reports table (for diagnostic/blood test reports)
         db.run(`CREATE TABLE IF NOT EXISTS reports (
@@ -79,6 +87,73 @@ function initializeDatabase() {
             FOREIGN KEY (patient_id) REFERENCES patients(id)
         )`);
 
+        // Medication tracking table
+        db.run(`CREATE TABLE IF NOT EXISTS medication_tracking (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id TEXT NOT NULL,
+            prescription_id INTEGER NOT NULL,
+            medicine_name TEXT NOT NULL,
+            dosage TEXT,
+            frequency TEXT,
+            duration INTEGER,
+            timing TEXT,
+            schedule_type TEXT, -- 'daily', 'specific_days', 'as_needed'
+            schedule_days TEXT, -- JSON array of days ['Monday', 'Wednesday', 'Friday']
+            reminder_times TEXT, -- JSON array of times ['08:00', '14:00', '20:00']
+            start_date TEXT,
+            end_date TEXT,
+            created_at TEXT,
+            FOREIGN KEY (patient_id) REFERENCES patients(id),
+            FOREIGN KEY (prescription_id) REFERENCES prescriptions(id)
+        )`);
+
+        // Medication intake logs
+        db.run(`CREATE TABLE IF NOT EXISTS medication_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id TEXT NOT NULL,
+            medication_tracking_id INTEGER NOT NULL,
+            medicine_name TEXT NOT NULL,
+            scheduled_time TEXT,
+            taken_time TEXT,
+            status TEXT, -- 'taken', 'missed', 'delayed'
+            notes TEXT,
+            created_at TEXT,
+            FOREIGN KEY (patient_id) REFERENCES patients(id),
+            FOREIGN KEY (medication_tracking_id) REFERENCES medication_tracking(id)
+        )`);
+
+        // Exercise/activity tracking
+        db.run(`CREATE TABLE IF NOT EXISTS activity_tracking (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id TEXT NOT NULL,
+            prescription_id INTEGER NOT NULL,
+            activity_name TEXT NOT NULL,
+            frequency TEXT,
+            duration INTEGER,
+            instructions TEXT,
+            reminder_times TEXT, -- JSON array of times
+            start_date TEXT,
+            end_date TEXT,
+            created_at TEXT,
+            FOREIGN KEY (patient_id) REFERENCES patients(id),
+            FOREIGN KEY (prescription_id) REFERENCES prescriptions(id)
+        )`);
+
+        // Activity logs
+        db.run(`CREATE TABLE IF NOT EXISTS activity_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id TEXT NOT NULL,
+            activity_tracking_id INTEGER NOT NULL,
+            activity_name TEXT NOT NULL,
+            scheduled_date TEXT,
+            completed_date TEXT,
+            status TEXT, -- 'completed', 'missed', 'partial'
+            notes TEXT,
+            created_at TEXT,
+            FOREIGN KEY (patient_id) REFERENCES patients(id),
+            FOREIGN KEY (activity_tracking_id) REFERENCES activity_tracking(id)
+        )`);
+
         // Images table (doctor-uploaded medical images)
         db.run(`CREATE TABLE IF NOT EXISTS images (
             id TEXT PRIMARY KEY,
@@ -111,8 +186,8 @@ function ensurePatientExists(patientId, cb) {
         if (row) return cb(null);
 
         db.run(
-            'INSERT INTO patients (id, name, age, gender, conditions, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [patientId, '', '', '', JSON.stringify([]), now, now],
+            'INSERT INTO patients (id, name, age, gender, blood_group, weight, height, conditions, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [patientId, '', '', '', '', '', '', JSON.stringify([]), now, now],
             (err) => cb(err || null)
         );
     });
@@ -141,6 +216,9 @@ app.get('/api/patients/:patientId', (req, res) => {
                     name: '',
                     age: '',
                     gender: '',
+                    blood_group: '',
+                    weight: '',
+                    height: '',
                     conditions: [],
                     reports: [],
                     prescriptions: [],
@@ -174,6 +252,9 @@ app.get('/api/patients/:patientId', (req, res) => {
                             name: patient.name || '',
                             age: patient.age || '',
                             gender: patient.gender || '',
+                            blood_group: patient.blood_group || '',
+                            weight: patient.weight || '',
+                            height: patient.height || '',
                             conditions: safeParseJSON(patient.conditions, []),
                             reports: reports.map(r => ({
                                 name: r.name,
@@ -185,6 +266,7 @@ app.get('/api/patients/:patientId', (req, res) => {
                                 summary: r.summary
                             })),
                             prescriptions: prescriptions.map(p => ({
+                                id: p.id,
                                 patientName: p.patient_name,
                                 patientAge: p.patient_age,
                                 patientGender: p.patient_gender,
@@ -220,7 +302,7 @@ app.get('/api/patients/:patientId', (req, res) => {
 // Save/Update patient data
 app.post('/api/patients/:patientId', (req, res) => {
     const patientId = req.params.patientId.toUpperCase();
-    const { name, age, gender, conditions } = req.body;
+    const { name, age, gender, blood_group, weight, height, conditions } = req.body;
 
     const now = new Date().toISOString();
 
@@ -236,11 +318,14 @@ app.post('/api/patients/:patientId', (req, res) => {
                 const nextName = (name !== undefined) ? (name || '') : (existing.name || '');
                 const nextAge = (age !== undefined) ? (age || '') : (existing.age || '');
                 const nextGender = (gender !== undefined) ? (gender || '') : (existing.gender || '');
+                const nextBloodGroup = (blood_group !== undefined) ? (blood_group || '') : (existing.blood_group || '');
+                const nextWeight = (weight !== undefined) ? (weight || '') : (existing.weight || '');
+                const nextHeight = (height !== undefined) ? (height || '') : (existing.height || '');
                 const nextConditions = (conditions !== undefined) ? JSON.stringify(conditions || []) : (existing.conditions || JSON.stringify([]));
 
                 db.run(
-                    'UPDATE patients SET name = ?, age = ?, gender = ?, conditions = ?, updated_at = ? WHERE id = ?',
-                    [nextName, nextAge, nextGender, nextConditions, now, patientId],
+                    'UPDATE patients SET name = ?, age = ?, gender = ?, blood_group = ?, weight = ?, height = ?, conditions = ?, updated_at = ? WHERE id = ?',
+                    [nextName, nextAge, nextGender, nextBloodGroup, nextWeight, nextHeight, nextConditions, now, patientId],
                     (err) => {
                         if (err) {
                             return res.status(500).json({ error: 'Database error updating patient', details: err.message });
@@ -251,8 +336,8 @@ app.post('/api/patients/:patientId', (req, res) => {
             } else {
                 // Create new patient
                 db.run(
-                    'INSERT INTO patients (id, name, age, gender, conditions, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    [patientId, name || '', age || '', gender || '', JSON.stringify(conditions || []), now, now],
+                    'INSERT INTO patients (id, name, age, gender, blood_group, weight, height, conditions, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [patientId, name || '', age || '', gender || '', blood_group || '', weight || '', height || '', JSON.stringify(conditions || []), now, now],
                     (err) => {
                         if (err) {
                             return res.status(500).json({ error: 'Database error creating patient', details: err.message });
@@ -372,9 +457,356 @@ app.post('/api/patients/:patientId/images', (req, res) => {
     });
 });
 
+// ============================================
+// MEDICATION TRACKING ENDPOINTS
+// ============================================
+
+// Save medication tracking record
+app.post('/api/medication-tracking', (req, res) => {
+    const { patient_id, prescription_id, medicine_name, dosage, frequency, duration, timing, 
+            schedule_type, schedule_days, reminder_times, start_date, end_date, created_at } = req.body;
+
+    db.run(
+        'INSERT INTO medication_tracking (patient_id, prescription_id, medicine_name, dosage, frequency, duration, timing, schedule_type, schedule_days, reminder_times, start_date, end_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [patient_id, prescription_id, medicine_name, dosage, frequency, duration, timing, 
+         schedule_type, JSON.stringify(schedule_days), JSON.stringify(reminder_times), 
+         start_date, end_date, created_at],
+        function(err) {
+            if (err) {
+                return res.status(500).json({ error: 'Database error saving medication tracking', details: err.message });
+            }
+            res.json({ success: true, trackingId: this.lastID });
+        }
+    );
+});
+
+// Save activity tracking record
+app.post('/api/activity-tracking', (req, res) => {
+    const { patient_id, prescription_id, activity_name, frequency, duration, instructions, 
+            reminder_times, start_date, end_date, created_at } = req.body;
+
+    db.run(
+        'INSERT INTO activity_tracking (patient_id, prescription_id, activity_name, frequency, duration, instructions, reminder_times, start_date, end_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [patient_id, prescription_id, activity_name, frequency, duration, instructions, 
+         JSON.stringify(reminder_times), start_date, end_date, created_at],
+        function(err) {
+            if (err) {
+                return res.status(500).json({ error: 'Database error saving activity tracking', details: err.message });
+            }
+            res.json({ success: true, trackingId: this.lastID });
+        }
+    );
+});
+
+// ============================================
+// MEDICATION TRACKING ENDPOINTS
+// ============================================
+
+// Get patient's medication schedule
+app.get('/api/patients/:patientId/medication-schedule', (req, res) => {
+    const patientId = req.params.patientId.toUpperCase();
+    
+    db.all(`
+        SELECT mt.*, p.date as prescription_date, p.doctor_id
+        FROM medication_tracking mt
+        JOIN prescriptions p ON mt.prescription_id = p.id
+        WHERE mt.patient_id = ? 
+        AND (mt.end_date IS NULL OR mt.end_date >= date('now'))
+        ORDER BY mt.schedule_type, mt.medicine_name
+    `, [patientId], (err, medications) => {
+        if (err) {
+            return res.status(500).json({ error: 'Database error', details: err.message });
+        }
+        
+        // Parse JSON fields
+        const parsedMedications = medications.map(med => ({
+            ...med,
+            schedule_days: safeParseJSON(med.schedule_days, []),
+            reminder_times: safeParseJSON(med.reminder_times, [])
+        }));
+        
+        res.json(parsedMedications);
+    });
+});
+
+// Log medication intake
+app.post('/api/medication/:trackingId/log', (req, res) => {
+    const trackingId = req.params.trackingId;
+    const { scheduledTime, status, notes } = req.body;
+    const takenTime = new Date().toISOString();
+    
+    db.run(
+        'INSERT INTO medication_logs (patient_id, medication_tracking_id, medicine_name, scheduled_time, taken_time, status, notes, created_at) VALUES ((SELECT patient_id FROM medication_tracking WHERE id = ?), ?, (SELECT medicine_name FROM medication_tracking WHERE id = ?), ?, ?, ?, ?, ?)',
+        [trackingId, trackingId, trackingId, scheduledTime, takenTime, status, notes || '', takenTime],
+        function(err) {
+            if (err) {
+                return res.status(500).json({ error: 'Database error logging medication', details: err.message });
+            }
+            res.json({ success: true, logId: this.lastID });
+        }
+    );
+});
+
+// Get today's medication schedule with status
+app.get('/api/patients/:patientId/today-medications', (req, res) => {
+    const patientId = req.params.patientId.toUpperCase();
+    const today = new Date().toISOString().split('T')[0];
+    
+    db.all(`
+        SELECT 
+            mt.*,
+            ml.status as today_status,
+            ml.taken_time as today_taken_time
+        FROM medication_tracking mt
+        LEFT JOIN medication_logs ml ON mt.id = ml.medication_tracking_id 
+            AND date(ml.scheduled_time) = date('now')
+        WHERE mt.patient_id = ? 
+        AND (mt.end_date IS NULL OR mt.end_date >= date('now'))
+        ORDER BY mt.medicine_name
+    `, [patientId], (err, medications) => {
+        if (err) {
+            return res.status(500).json({ error: 'Database error', details: err.message });
+        }
+        
+        const parsedMedications = medications.map(med => ({
+            ...med,
+            schedule_days: safeParseJSON(med.schedule_days, []),
+            reminder_times: safeParseJSON(med.reminder_times, [])
+        }));
+        
+        res.json(parsedMedications);
+    });
+});
+
+// Get activity/exercise schedule
+app.get('/api/patients/:patientId/activity-schedule', (req, res) => {
+    const patientId = req.params.patientId.toUpperCase();
+    
+    db.all(`
+        SELECT *
+        FROM activity_tracking
+        WHERE patient_id = ?
+        AND (end_date IS NULL OR end_date >= date('now'))
+        ORDER BY activity_name
+    `, [patientId], (err, activities) => {
+        if (err) {
+            return res.status(500).json({ error: 'Database error', details: err.message });
+        }
+        
+        const parsedActivities = activities.map(activity => ({
+            ...activity,
+            reminder_times: safeParseJSON(activity.reminder_times, [])
+        }));
+        
+        res.json(parsedActivities);
+    });
+});
+
+// Log activity completion
+app.post('/api/activity/:trackingId/log', (req, res) => {
+    const trackingId = req.params.trackingId;
+    const { status, notes } = req.body;
+    const completedTime = new Date().toISOString();
+    const scheduledDate = new Date().toISOString().split('T')[0];
+    
+    db.run(
+        'INSERT INTO activity_logs (patient_id, activity_tracking_id, activity_name, scheduled_date, completed_date, status, notes, created_at) VALUES ((SELECT patient_id FROM activity_tracking WHERE id = ?), ?, (SELECT activity_name FROM activity_tracking WHERE id = ?), ?, ?, ?, ?, ?)',
+        [trackingId, trackingId, trackingId, scheduledDate, completedTime, status, notes || '', completedTime],
+        function(err) {
+            if (err) {
+                return res.status(500).json({ error: 'Database error logging activity', details: err.message });
+            }
+            res.json({ success: true, logId: this.lastID });
+        }
+    );
+});
+
+// Get today's activities with status
+app.get('/api/patients/:patientId/today-activities', (req, res) => {
+    const patientId = req.params.patientId.toUpperCase();
+    const today = new Date().toISOString().split('T')[0];
+    
+    db.all(`
+        SELECT 
+            at.*,
+            al.status as today_status,
+            al.completed_date as today_completed_time
+        FROM activity_tracking at
+        LEFT JOIN activity_logs al ON at.id = al.activity_tracking_id 
+            AND date(al.scheduled_date) = date('now')
+        WHERE at.patient_id = ?
+        AND (at.end_date IS NULL OR at.end_date >= date('now'))
+        ORDER BY at.activity_name
+    `, [patientId], (err, activities) => {
+        if (err) {
+            return res.status(500).json({ error: 'Database error', details: err.message });
+        }
+        
+        const parsedActivities = activities.map(activity => ({
+            ...activity,
+            reminder_times: safeParseJSON(activity.reminder_times, [])
+        }));
+        
+        res.json(parsedActivities);
+    });
+});
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', message: 'API is running' });
+});
+
+// ============================================
+// MEDICATION TRACKING ENDPOINTS
+// ============================================
+
+// Get patient's medication schedule
+app.get('/api/patients/:patientId/medication-schedule', (req, res) => {
+    const patientId = req.params.patientId.toUpperCase();
+    
+    db.all(`
+        SELECT mt.*, p.date as prescription_date, p.doctor_id
+        FROM medication_tracking mt
+        JOIN prescriptions p ON mt.prescription_id = p.id
+        WHERE mt.patient_id = ? 
+        AND (mt.end_date IS NULL OR mt.end_date >= date('now'))
+        ORDER BY mt.schedule_type, mt.medicine_name
+    `, [patientId], (err, medications) => {
+        if (err) {
+            return res.status(500).json({ error: 'Database error', details: err.message });
+        }
+        
+        // Parse JSON fields
+        const parsedMedications = medications.map(med => ({
+            ...med,
+            schedule_days: safeParseJSON(med.schedule_days, []),
+            reminder_times: safeParseJSON(med.reminder_times, [])
+        }));
+        
+        res.json(parsedMedications);
+    });
+});
+
+// Log medication intake
+app.post('/api/medication/:trackingId/log', (req, res) => {
+    const trackingId = req.params.trackingId;
+    const { scheduledTime, status, notes } = req.body;
+    const takenTime = new Date().toISOString();
+    
+    db.run(
+        'INSERT INTO medication_logs (patient_id, medication_tracking_id, medicine_name, scheduled_time, taken_time, status, notes, created_at) VALUES ((SELECT patient_id FROM medication_tracking WHERE id = ?), ?, (SELECT medicine_name FROM medication_tracking WHERE id = ?), ?, ?, ?, ?, ?)',
+        [trackingId, trackingId, trackingId, scheduledTime, takenTime, status, notes || '', takenTime],
+        function(err) {
+            if (err) {
+                return res.status(500).json({ error: 'Database error logging medication', details: err.message });
+            }
+            res.json({ success: true, logId: this.lastID });
+        }
+    );
+});
+
+// Get today's medication schedule with status
+app.get('/api/patients/:patientId/today-medications', (req, res) => {
+    const patientId = req.params.patientId.toUpperCase();
+    const today = new Date().toISOString().split('T')[0];
+    
+    db.all(`
+        SELECT 
+            mt.*,
+            ml.status as today_status,
+            ml.taken_time as today_taken_time
+        FROM medication_tracking mt
+        LEFT JOIN medication_logs ml ON mt.id = ml.medication_tracking_id 
+            AND date(ml.scheduled_time) = date('now')
+        WHERE mt.patient_id = ? 
+        AND (mt.end_date IS NULL OR mt.end_date >= date('now'))
+        ORDER BY mt.medicine_name
+    `, [patientId], (err, medications) => {
+        if (err) {
+            return res.status(500).json({ error: 'Database error', details: err.message });
+        }
+        
+        const parsedMedications = medications.map(med => ({
+            ...med,
+            schedule_days: safeParseJSON(med.schedule_days, []),
+            reminder_times: safeParseJSON(med.reminder_times, [])
+        }));
+        
+        res.json(parsedMedications);
+    });
+});
+
+// Get activity/exercise schedule
+app.get('/api/patients/:patientId/activity-schedule', (req, res) => {
+    const patientId = req.params.patientId.toUpperCase();
+    
+    db.all(`
+        SELECT *
+        FROM activity_tracking
+        WHERE patient_id = ?
+        AND (end_date IS NULL OR end_date >= date('now'))
+        ORDER BY activity_name
+    `, [patientId], (err, activities) => {
+        if (err) {
+            return res.status(500).json({ error: 'Database error', details: err.message });
+        }
+        
+        const parsedActivities = activities.map(activity => ({
+            ...activity,
+            reminder_times: safeParseJSON(activity.reminder_times, [])
+        }));
+        
+        res.json(parsedActivities);
+    });
+});
+
+// Log activity completion
+app.post('/api/activity/:trackingId/log', (req, res) => {
+    const trackingId = req.params.trackingId;
+    const { status, notes } = req.body;
+    const completedTime = new Date().toISOString();
+    const scheduledDate = new Date().toISOString().split('T')[0];
+    
+    db.run(
+        'INSERT INTO activity_logs (patient_id, activity_tracking_id, activity_name, scheduled_date, completed_date, status, notes, created_at) VALUES ((SELECT patient_id FROM activity_tracking WHERE id = ?), ?, (SELECT activity_name FROM activity_tracking WHERE id = ?), ?, ?, ?, ?, ?)',
+        [trackingId, trackingId, trackingId, scheduledDate, completedTime, status, notes || '', completedTime],
+        function(err) {
+            if (err) {
+                return res.status(500).json({ error: 'Database error logging activity', details: err.message });
+            }
+            res.json({ success: true, logId: this.lastID });
+        }
+    );
+});
+
+// Get today's activities with status
+app.get('/api/patients/:patientId/today-activities', (req, res) => {
+    const patientId = req.params.patientId.toUpperCase();
+    const today = new Date().toISOString().split('T')[0];
+    
+    db.all(`
+        SELECT 
+            at.*,
+            al.status as today_status,
+            al.completed_date as today_completed_time
+        FROM activity_tracking at
+        LEFT JOIN activity_logs al ON at.id = al.activity_tracking_id 
+            AND date(al.scheduled_date) = date('now')
+        WHERE at.patient_id = ?
+        AND (at.end_date IS NULL OR at.end_date >= date('now'))
+        ORDER BY at.activity_name
+    `, [patientId], (err, activities) => {
+        if (err) {
+            return res.status(500).json({ error: 'Database error', details: err.message });
+        }
+        
+        const parsedActivities = activities.map(activity => ({
+            ...activity,
+            reminder_times: safeParseJSON(activity.reminder_times, [])
+        }));
+        
+        res.json(parsedActivities);
+    });
 });
 
 // Root route - serve the main index page
