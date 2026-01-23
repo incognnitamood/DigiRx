@@ -133,6 +133,44 @@
             </div>
             
             <div class="section">
+                <h3>⚙️ Notification Settings</h3>
+                <p class="info-text">Customize how you receive medication reminders</p>
+                <div class="notification-settings">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Reminder Interval (minutes)</label>
+                            <select id="reminderInterval" class="input-field">
+                                <option value="5">5 minutes</option>
+                                <option value="10">10 minutes</option>
+                                <option value="15" selected>15 minutes (default)</option>
+                                <option value="30">30 minutes</option>
+                                <option value="60">1 hour</option>
+                            </select>
+                            <small>How often to remind you before medication time</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Snooze Duration (minutes)</label>
+                            <select id="snoozeDuration" class="input-field">
+                                <option value="5">5 minutes</option>
+                                <option value="10" selected>10 minutes (default)</option>
+                                <option value="15">15 minutes</option>
+                                <option value="30">30 minutes</option>
+                            </select>
+                            <small>How long to wait when you snooze a reminder</small>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="enableNotifications" checked>
+                            Enable browser notifications for medication reminders
+                        </label>
+                    </div>
+                    <button class="btn-primary" onclick="saveNotificationPreferences()">Save Notification Settings</button>
+                    <div id="notificationSettingsSaved" class="success-message hidden">✓ Notification settings saved!</div>
+                </div>
+            </div>
+            
+            <div class="section">
                 <h3>Today's Medications</h3>
                 <div id="todaysMedications" class="medications-list">
                     <p class="empty-state">Your medications will appear here once prescribed by your doctor.</p>

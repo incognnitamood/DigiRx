@@ -166,6 +166,18 @@ function initializeDatabase() {
             FOREIGN KEY (patient_id) REFERENCES patients(id)
         )`);
 
+        // Notification preferences table
+        db.run(`CREATE TABLE IF NOT EXISTS notification_preferences (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id TEXT NOT NULL UNIQUE,
+            reminder_interval INTEGER DEFAULT 15,
+            snooze_duration INTEGER DEFAULT 10,
+            enable_notifications INTEGER DEFAULT 1,
+            created_at TEXT,
+            updated_at TEXT,
+            FOREIGN KEY (patient_id) REFERENCES patients(id)
+        )`);
+
         console.log('Database tables initialized');
     });
 }
@@ -257,6 +269,7 @@ app.get('/api/patients/:patientId', (req, res) => {
                             height: patient.height || '',
                             conditions: safeParseJSON(patient.conditions, []),
                             reports: reports.map(r => ({
+                                id: r.id,
                                 name: r.name,
                                 size: r.size,
                                 type: r.type,
@@ -431,6 +444,84 @@ app.post('/api/patients/:patientId/prescriptions', (req, res) => {
     });
 });
 
+// Delete a prescription (doctor)
+app.delete('/api/patients/:patientId/prescriptions/:prescriptionId', (req, res) => {
+    const patientId = req.params.patientId.toUpperCase();
+    const prescriptionId = parseInt(req.params.prescriptionId, 10);
+
+    if (!prescriptionId || Number.isNaN(prescriptionId)) {
+        return res.status(400).json({ error: 'Invalid prescription id' });
+    }
+
+    db.serialize(() => {
+        // Delete medication logs tied to this prescription
+        db.run(
+            `DELETE FROM medication_logs WHERE medication_tracking_id IN (
+                SELECT id FROM medication_tracking WHERE prescription_id = ? AND patient_id = ?
+            )`,
+            [prescriptionId, patientId],
+            (err) => {
+                if (err) return res.status(500).json({ error: 'Failed to delete medication logs', details: err.message });
+
+                // Delete medication tracking
+                db.run(
+                    'DELETE FROM medication_tracking WHERE prescription_id = ? AND patient_id = ?',
+                    [prescriptionId, patientId],
+                    (err) => {
+                        if (err) return res.status(500).json({ error: 'Failed to delete medication tracking', details: err.message });
+
+                        // Delete activity logs tied to this prescription
+                        db.run(
+                            `DELETE FROM activity_logs WHERE activity_tracking_id IN (
+                                SELECT id FROM activity_tracking WHERE prescription_id = ? AND patient_id = ?
+                            )`,
+                            [prescriptionId, patientId],
+                            (err) => {
+                                if (err) return res.status(500).json({ error: 'Failed to delete activity logs', details: err.message });
+
+                                // Delete activity tracking
+                                db.run(
+                                    'DELETE FROM activity_tracking WHERE prescription_id = ? AND patient_id = ?',
+                                    [prescriptionId, patientId],
+                                    (err) => {
+                                        if (err) return res.status(500).json({ error: 'Failed to delete activities', details: err.message });
+
+                                        // Finally delete the prescription
+                                        db.run(
+                                            'DELETE FROM prescriptions WHERE id = ? AND patient_id = ?',
+                                            [prescriptionId, patientId],
+                                            function(err) {
+                                                if (err) return res.status(500).json({ error: 'Failed to delete prescription', details: err.message });
+                                                res.json({ success: true, deleted: this.changes });
+                                            }
+                                        );
+                                    }
+                                );
+                            }
+                        );
+                    }
+                );
+            }
+        );
+    });
+});
+
+// Delete a patient report (patient)
+app.delete('/api/patients/:patientId/reports/:reportId', (req, res) => {
+    const patientId = req.params.patientId.toUpperCase();
+    const reportId = parseInt(req.params.reportId, 10);
+    if (!reportId || Number.isNaN(reportId)) {
+        return res.status(400).json({ error: 'Invalid report id' });
+    }
+
+    db.run('DELETE FROM reports WHERE id = ? AND patient_id = ?', [reportId, patientId], function(err) {
+        if (err) {
+            return res.status(500).json({ error: 'Failed to delete report', details: err.message });
+        }
+        res.json({ success: true, deleted: this.changes });
+    });
+});
+
 // Upload image
 app.post('/api/patients/:patientId/images', (req, res) => {
     const patientId = req.params.patientId.toUpperCase();
@@ -534,10 +625,13 @@ app.post('/api/medication/:trackingId/log', (req, res) => {
     const trackingId = req.params.trackingId;
     const { scheduledTime, status, notes } = req.body;
     const takenTime = new Date().toISOString();
+    // Store full datetime for scheduled_time (today's date + the scheduled time)
+    const today = new Date().toISOString().split('T')[0];
+    const fullScheduledTime = `${today}T${scheduledTime}:00`;
     
     db.run(
         'INSERT INTO medication_logs (patient_id, medication_tracking_id, medicine_name, scheduled_time, taken_time, status, notes, created_at) VALUES ((SELECT patient_id FROM medication_tracking WHERE id = ?), ?, (SELECT medicine_name FROM medication_tracking WHERE id = ?), ?, ?, ?, ?, ?)',
-        [trackingId, trackingId, trackingId, scheduledTime, takenTime, status, notes || '', takenTime],
+        [trackingId, trackingId, trackingId, fullScheduledTime, takenTime, status, notes || '', takenTime],
         function(err) {
             if (err) {
                 return res.status(500).json({ error: 'Database error logging medication', details: err.message });
@@ -545,110 +639,6 @@ app.post('/api/medication/:trackingId/log', (req, res) => {
             res.json({ success: true, logId: this.lastID });
         }
     );
-});
-
-// Get today's medication schedule with status
-app.get('/api/patients/:patientId/today-medications', (req, res) => {
-    const patientId = req.params.patientId.toUpperCase();
-    const today = new Date().toISOString().split('T')[0];
-    
-    db.all(`
-        SELECT 
-            mt.*,
-            ml.status as today_status,
-            ml.taken_time as today_taken_time
-        FROM medication_tracking mt
-        LEFT JOIN medication_logs ml ON mt.id = ml.medication_tracking_id 
-            AND date(ml.scheduled_time) = date('now')
-        WHERE mt.patient_id = ? 
-        AND (mt.end_date IS NULL OR mt.end_date >= date('now'))
-        ORDER BY mt.medicine_name
-    `, [patientId], (err, medications) => {
-        if (err) {
-            return res.status(500).json({ error: 'Database error', details: err.message });
-        }
-        
-        const parsedMedications = medications.map(med => ({
-            ...med,
-            schedule_days: safeParseJSON(med.schedule_days, []),
-            reminder_times: safeParseJSON(med.reminder_times, [])
-        }));
-        
-        res.json(parsedMedications);
-    });
-});
-
-// Get activity/exercise schedule
-app.get('/api/patients/:patientId/activity-schedule', (req, res) => {
-    const patientId = req.params.patientId.toUpperCase();
-    
-    db.all(`
-        SELECT *
-        FROM activity_tracking
-        WHERE patient_id = ?
-        AND (end_date IS NULL OR end_date >= date('now'))
-        ORDER BY activity_name
-    `, [patientId], (err, activities) => {
-        if (err) {
-            return res.status(500).json({ error: 'Database error', details: err.message });
-        }
-        
-        const parsedActivities = activities.map(activity => ({
-            ...activity,
-            reminder_times: safeParseJSON(activity.reminder_times, [])
-        }));
-        
-        res.json(parsedActivities);
-    });
-});
-
-// Log activity completion
-app.post('/api/activity/:trackingId/log', (req, res) => {
-    const trackingId = req.params.trackingId;
-    const { status, notes } = req.body;
-    const completedTime = new Date().toISOString();
-    const scheduledDate = new Date().toISOString().split('T')[0];
-    
-    db.run(
-        'INSERT INTO activity_logs (patient_id, activity_tracking_id, activity_name, scheduled_date, completed_date, status, notes, created_at) VALUES ((SELECT patient_id FROM activity_tracking WHERE id = ?), ?, (SELECT activity_name FROM activity_tracking WHERE id = ?), ?, ?, ?, ?, ?)',
-        [trackingId, trackingId, trackingId, scheduledDate, completedTime, status, notes || '', completedTime],
-        function(err) {
-            if (err) {
-                return res.status(500).json({ error: 'Database error logging activity', details: err.message });
-            }
-            res.json({ success: true, logId: this.lastID });
-        }
-    );
-});
-
-// Get today's activities with status
-app.get('/api/patients/:patientId/today-activities', (req, res) => {
-    const patientId = req.params.patientId.toUpperCase();
-    const today = new Date().toISOString().split('T')[0];
-    
-    db.all(`
-        SELECT 
-            at.*,
-            al.status as today_status,
-            al.completed_date as today_completed_time
-        FROM activity_tracking at
-        LEFT JOIN activity_logs al ON at.id = al.activity_tracking_id 
-            AND date(al.scheduled_date) = date('now')
-        WHERE at.patient_id = ?
-        AND (at.end_date IS NULL OR at.end_date >= date('now'))
-        ORDER BY at.activity_name
-    `, [patientId], (err, activities) => {
-        if (err) {
-            return res.status(500).json({ error: 'Database error', details: err.message });
-        }
-        
-        const parsedActivities = activities.map(activity => ({
-            ...activity,
-            reminder_times: safeParseJSON(activity.reminder_times, [])
-        }));
-        
-        res.json(parsedActivities);
-    });
 });
 
 // Health check endpoint
@@ -656,68 +646,15 @@ app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', message: 'API is running' });
 });
 
-// ============================================
-// MEDICATION TRACKING ENDPOINTS
-// ============================================
-
-// Get patient's medication schedule
-app.get('/api/patients/:patientId/medication-schedule', (req, res) => {
-    const patientId = req.params.patientId.toUpperCase();
-    
-    db.all(`
-        SELECT mt.*, p.date as prescription_date, p.doctor_id
-        FROM medication_tracking mt
-        JOIN prescriptions p ON mt.prescription_id = p.id
-        WHERE mt.patient_id = ? 
-        AND (mt.end_date IS NULL OR mt.end_date >= date('now'))
-        ORDER BY mt.schedule_type, mt.medicine_name
-    `, [patientId], (err, medications) => {
-        if (err) {
-            return res.status(500).json({ error: 'Database error', details: err.message });
-        }
-        
-        // Parse JSON fields
-        const parsedMedications = medications.map(med => ({
-            ...med,
-            schedule_days: safeParseJSON(med.schedule_days, []),
-            reminder_times: safeParseJSON(med.reminder_times, [])
-        }));
-        
-        res.json(parsedMedications);
-    });
-});
-
-// Log medication intake
-app.post('/api/medication/:trackingId/log', (req, res) => {
-    const trackingId = req.params.trackingId;
-    const { scheduledTime, status, notes } = req.body;
-    const takenTime = new Date().toISOString();
-    
-    db.run(
-        'INSERT INTO medication_logs (patient_id, medication_tracking_id, medicine_name, scheduled_time, taken_time, status, notes, created_at) VALUES ((SELECT patient_id FROM medication_tracking WHERE id = ?), ?, (SELECT medicine_name FROM medication_tracking WHERE id = ?), ?, ?, ?, ?, ?)',
-        [trackingId, trackingId, trackingId, scheduledTime, takenTime, status, notes || '', takenTime],
-        function(err) {
-            if (err) {
-                return res.status(500).json({ error: 'Database error logging medication', details: err.message });
-            }
-            res.json({ success: true, logId: this.lastID });
-        }
-    );
-});
-
-// Get today's medication schedule with status
+// Get today's medication schedule with status (fetches all logs for today)
 app.get('/api/patients/:patientId/today-medications', (req, res) => {
     const patientId = req.params.patientId.toUpperCase();
     const today = new Date().toISOString().split('T')[0];
     
+    // First get all medications
     db.all(`
-        SELECT 
-            mt.*,
-            ml.status as today_status,
-            ml.taken_time as today_taken_time
+        SELECT mt.*
         FROM medication_tracking mt
-        LEFT JOIN medication_logs ml ON mt.id = ml.medication_tracking_id 
-            AND date(ml.scheduled_time) = date('now')
         WHERE mt.patient_id = ? 
         AND (mt.end_date IS NULL OR mt.end_date >= date('now'))
         ORDER BY mt.medicine_name
@@ -726,13 +663,32 @@ app.get('/api/patients/:patientId/today-medications', (req, res) => {
             return res.status(500).json({ error: 'Database error', details: err.message });
         }
         
-        const parsedMedications = medications.map(med => ({
-            ...med,
-            schedule_days: safeParseJSON(med.schedule_days, []),
-            reminder_times: safeParseJSON(med.reminder_times, [])
-        }));
-        
-        res.json(parsedMedications);
+        // Get all logs for today
+        db.all(`
+            SELECT medication_tracking_id, scheduled_time, status, taken_time
+            FROM medication_logs
+            WHERE patient_id = ? AND date(scheduled_time) = date('now')
+        `, [patientId], (err, logs) => {
+            if (err) {
+                return res.status(500).json({ error: 'Database error fetching logs', details: err.message });
+            }
+            
+            // Create a map of taken times for quick lookup
+            const takenTimes = {};
+            logs.forEach(log => {
+                const key = `${log.medication_tracking_id}-${log.scheduled_time.split('T')[1]?.substring(0,5) || log.scheduled_time}`;
+                takenTimes[key] = log.status;
+            });
+            
+            const parsedMedications = medications.map(med => ({
+                ...med,
+                schedule_days: safeParseJSON(med.schedule_days, []),
+                reminder_times: safeParseJSON(med.reminder_times, []),
+                taken_times: takenTimes // Include the map of which times are taken
+            }));
+            
+            res.json(parsedMedications);
+        });
     });
 });
 
@@ -777,6 +733,72 @@ app.post('/api/activity/:trackingId/log', (req, res) => {
             res.json({ success: true, logId: this.lastID });
         }
     );
+});
+
+// Get notification preferences
+app.get('/api/patients/:patientId/notification-preferences', (req, res) => {
+    const patientId = req.params.patientId.toUpperCase();
+    
+    db.get('SELECT * FROM notification_preferences WHERE patient_id = ?', [patientId], (err, prefs) => {
+        if (err) {
+            return res.status(500).json({ error: 'Database error', details: err.message });
+        }
+        
+        // Return defaults if not set
+        if (!prefs) {
+            return res.json({
+                reminder_interval: 15,
+                snooze_duration: 10,
+                enable_notifications: 1
+            });
+        }
+        
+        res.json({
+            reminder_interval: prefs.reminder_interval,
+            snooze_duration: prefs.snooze_duration,
+            enable_notifications: prefs.enable_notifications
+        });
+    });
+});
+
+// Update notification preferences
+app.post('/api/patients/:patientId/notification-preferences', (req, res) => {
+    const patientId = req.params.patientId.toUpperCase();
+    const { reminder_interval, snooze_duration, enable_notifications } = req.body;
+    const now = new Date().toISOString();
+    
+    // Check if preferences exist
+    db.get('SELECT id FROM notification_preferences WHERE patient_id = ?', [patientId], (err, existing) => {
+        if (err) {
+            return res.status(500).json({ error: 'Database error', details: err.message });
+        }
+        
+        if (existing) {
+            // Update existing preferences
+            db.run(
+                'UPDATE notification_preferences SET reminder_interval = ?, snooze_duration = ?, enable_notifications = ?, updated_at = ? WHERE patient_id = ?',
+                [reminder_interval || 15, snooze_duration || 10, enable_notifications !== undefined ? enable_notifications : 1, now, patientId],
+                (err) => {
+                    if (err) {
+                        return res.status(500).json({ error: 'Database error updating preferences', details: err.message });
+                    }
+                    res.json({ success: true, message: 'Preferences updated' });
+                }
+            );
+        } else {
+            // Create new preferences
+            db.run(
+                'INSERT INTO notification_preferences (patient_id, reminder_interval, snooze_duration, enable_notifications, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+                [patientId, reminder_interval || 15, snooze_duration || 10, enable_notifications !== undefined ? enable_notifications : 1, now, now],
+                (err) => {
+                    if (err) {
+                        return res.status(500).json({ error: 'Database error creating preferences', details: err.message });
+                    }
+                    res.json({ success: true, message: 'Preferences created' });
+                }
+            );
+        }
+    });
 });
 
 // Get today's activities with status

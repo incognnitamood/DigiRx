@@ -1884,6 +1884,9 @@ async function savePatient(patientId, patientData) {
         name: patientData?.name,
         age: patientData?.age,
         gender: patientData?.gender,
+        blood_group: patientData?.blood_group,
+        weight: patientData?.weight,
+        height: patientData?.height,
         conditions: patientData?.conditions
     };
 
@@ -2016,6 +2019,9 @@ async function initializePatientDashboard() {
     // Display patient images
     void displayPatientImages();
     
+    // Load notification preferences
+    await loadNotificationPreferences();
+    
     // Initialize notification system for reminders
     initializeNotifications();
 }
@@ -2072,12 +2078,23 @@ function displayTodaysMedications(medications) {
         });
     });
     
-    // Calculate progress
-    const totalDoses = medications.reduce((sum, med) => {
+    // Calculate progress - count per time slot
+    let totalDoses = 0;
+    let takenDoses = 0;
+    
+    medications.forEach(med => {
         const times = Array.isArray(med.reminder_times) ? med.reminder_times : [];
-        return sum + times.length;
-    }, 0);
-    const takenDoses = medications.filter(med => med.today_status === 'taken').length;
+        const takenTimesMap = med.taken_times || {};
+        totalDoses += times.length;
+        
+        times.forEach(time => {
+            const timeKey = `${med.id}-${time}`;
+            if (takenTimesMap[timeKey] === 'taken') {
+                takenDoses++;
+            }
+        });
+    });
+    
     const progressPercent = totalDoses > 0 ? Math.round((takenDoses / totalDoses) * 100) : 0;
     
     let html = `
@@ -2106,7 +2123,10 @@ function displayTodaysMedications(medications) {
         `;
         
         data.meds.forEach(med => {
-            const isTaken = med.today_status === 'taken';
+            // Check if this specific time slot is taken using the taken_times map
+            const takenTimesMap = med.taken_times || {};
+            const timeKey = `${med.id}-${med.scheduleTime}`;
+            const isTaken = takenTimesMap[timeKey] === 'taken';
             const statusClass = isTaken ? 'taken' : 'pending';
             const now = new Date();
             const [schedHours, schedMins] = med.scheduleTime.split(':').map(Number);
@@ -2316,6 +2336,7 @@ async function uploadReports() {
 }
 
 function displayUploadedFiles(patientData) {
+    const patientId = getCurrentUserId();
     const container = document.getElementById('uploadedFiles');
     
     if (patientData.reports.length === 0) {
@@ -2376,9 +2397,12 @@ function displayUploadedFiles(patientData) {
                         ${previewHtml}
                         ${summarySection}
                     </div>
-                    <span style="color: var(--color-text-light); font-size: var(--font-size-small);">
-                        ${new Date(report.uploadedAt).toLocaleDateString()}
-                    </span>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="color: var(--color-text-light); font-size: var(--font-size-small);">
+                            ${new Date(report.uploadedAt).toLocaleDateString()}
+                        </span>
+                        ${report.id ? `<button class="btn-remove" style="background: #ef4444; color: #fff;" onclick="deleteUploadedReport(${report.id}, '${report.name.replace(/'/g, "\\'")}')">Delete</button>` : ''}
+                    </div>
                 </div>
             `;
         }).join('');
@@ -2420,7 +2444,7 @@ function displayPatientPrescriptions(patientData) {
     
     // Store prescriptions for printing
     window.patientPrescriptions = patientData.prescriptions;
-    window.patientInfo = { name: patientData.name, age: patientData.age, gender: patientData.gender, id: patientData.id };
+    window.patientInfo = { name: patientData.name, age: patientData.age, gender: patientData.gender, blood_group: patientData.blood_group, weight: patientData.weight, height: patientData.height, id: patientData.id };
 }
 
 // ============================================
@@ -2981,7 +3005,7 @@ function displayPatientPrescriptionHistory(patientData) {
     
     // Store prescriptions and patient info for printing
     window.doctorViewPrescriptions = patientData.prescriptions;
-    window.doctorViewPatientInfo = { name: patientData.name, age: patientData.age, gender: patientData.gender, id: patientData.id };
+    window.doctorViewPatientInfo = { name: patientData.name, age: patientData.age, gender: patientData.gender, blood_group: patientData.blood_group, weight: patientData.weight, height: patientData.height, id: patientData.id };
     
     container.innerHTML = '<div style="display: flex; flex-direction: column; gap: var(--spacing-md);">' +
         patientData.prescriptions.map((prescription, index) => {
@@ -3010,6 +3034,9 @@ function displayPatientPrescriptionHistory(patientData) {
                             <button class="btn-print" onclick="printPrescriptionDoctor(${index})">
                                 🖨️ Print
                             </button>
+                            <button class="btn-remove" style="background: #ef4444; color: #fff;" onclick="deletePrescription(${prescription.id})">
+                                🗑️ Delete
+                            </button>
                         </div>
                     </div>
                     
@@ -3026,6 +3053,44 @@ ${prescription.content}
             `;
         }).join('') +
         '</div>';
+}
+
+// Delete a prescription (doctor)
+async function deletePrescription(prescriptionId) {
+    if (!currentPatientId) {
+        alert('Please load a patient first');
+        return;
+    }
+    if (!confirm('Delete this prescription? This will also remove its reminders/logs.')) return;
+    try {
+        await apiFetchJson(`/api/patients/${encodeURIComponent(currentPatientId)}/prescriptions/${encodeURIComponent(prescriptionId)}`, {
+            method: 'DELETE'
+        });
+        // Refresh just the prescription history
+        const patientData = await fetchPatientData(currentPatientId);
+        displayPatientPrescriptionHistory(patientData);
+        alert('Prescription deleted.');
+    } catch (e) {
+        alert('Failed to delete prescription: ' + e.message);
+    }
+}
+
+// Delete uploaded report (patient)
+async function deleteUploadedReport(reportId, reportName) {
+    const patientId = getCurrentUserId();
+    if (!patientId) return;
+    if (!confirm(`Delete report "${reportName}"?`)) return;
+    try {
+        await apiFetchJson(`/api/patients/${encodeURIComponent(patientId)}/reports/${encodeURIComponent(reportId)}`, {
+            method: 'DELETE'
+        });
+        const data = await fetchPatientData(patientId);
+        displayUploadedFiles(data);
+        displayExtractedConditions(data); // conditions may still include items from previous uploads
+        alert('Report deleted.');
+    } catch (e) {
+        alert('Failed to delete report: ' + e.message);
+    }
 }
 
 // ============================================
@@ -5257,19 +5322,25 @@ async function checkMedicationReminders() {
         
         // Check medications
         for (const med of medications) {
-            if (med.today_status === 'taken') continue;
-            
             // reminder_times is already parsed by the server
             const reminderTimes = Array.isArray(med.reminder_times) ? med.reminder_times : [];
+            const takenTimesMap = med.taken_times || {};
             for (const time of reminderTimes) {
+                // Skip if this particular time slot is already taken
+                const timeKey = `${med.id}-${time}`;
+                if (takenTimesMap[timeKey] === 'taken') continue;
+
                 const [hours, minutes] = time.split(':').map(Number);
                 const reminderMinutes = hours * 60 + minutes;
                 
-                // Notify 5 minutes before and at the scheduled time
+                // Get reminder interval from preferences (default 15 minutes)
+                const reminderInterval = window.notificationPreferences?.reminder_interval || 15;
+                
+                // Notify before and at the scheduled time based on user preference
                 const diff = reminderMinutes - currentTime;
                 const reminderKey = `med-${med.id}-${time}-${now.toDateString()}`;
                 
-                if ((diff >= 0 && diff <= 5) && !notifiedReminders.has(reminderKey)) {
+                if ((diff >= 0 && diff <= reminderInterval) && !notifiedReminders.has(reminderKey)) {
                     showMedicationNotification(med.medicine_name, med.dosage, med.timing);
                     notifiedReminders.add(reminderKey);
                 }
@@ -5413,5 +5484,93 @@ function getTimePeriodIcon(period) {
         case 'Evening': return '🌆';
         case 'Night': return '🌙';
         default: return '⏰';
+    }
+}
+
+// ============================================
+// NOTIFICATION PREFERENCES
+// ============================================
+
+// Load notification preferences from server
+async function loadNotificationPreferences() {
+    const patientId = getCurrentUserId();
+    if (!patientId || getCurrentRole() !== 'patient') return;
+    
+    try {
+        const response = await fetch(`/api/patients/${patientId}/notification-preferences`);
+        const prefs = await response.json();
+        
+        // Update UI
+        const reminderIntervalSelect = document.getElementById('reminderInterval');
+        const snoozeDurationSelect = document.getElementById('snoozeDuration');
+        const enableNotificationsCheckbox = document.getElementById('enableNotifications');
+        
+        if (reminderIntervalSelect) reminderIntervalSelect.value = prefs.reminder_interval || 15;
+        if (snoozeDurationSelect) snoozeDurationSelect.value = prefs.snooze_duration || 10;
+        if (enableNotificationsCheckbox) enableNotificationsCheckbox.checked = prefs.enable_notifications !== 0;
+        
+        // Store in memory for use by notification system
+        window.notificationPreferences = prefs;
+    } catch (error) {
+        console.error('Error loading notification preferences:', error);
+        // Use defaults
+        window.notificationPreferences = {
+            reminder_interval: 15,
+            snooze_duration: 10,
+            enable_notifications: 1
+        };
+    }
+}
+
+// Save notification preferences
+async function saveNotificationPreferences() {
+    const patientId = getCurrentUserId();
+    if (!patientId || getCurrentRole() !== 'patient') return;
+    
+    const reminderInterval = parseInt(document.getElementById('reminderInterval').value);
+    const snoozeDuration = parseInt(document.getElementById('snoozeDuration').value);
+    const enableNotifications = document.getElementById('enableNotifications').checked ? 1 : 0;
+    
+    try {
+        const response = await fetch(`/api/patients/${patientId}/notification-preferences`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                reminder_interval: reminderInterval,
+                snooze_duration: snoozeDuration,
+                enable_notifications: enableNotifications
+            })
+        });
+        
+        if (response.ok) {
+            // Update in-memory preferences
+            window.notificationPreferences = {
+                reminder_interval: reminderInterval,
+                snooze_duration: snoozeDuration,
+                enable_notifications: enableNotifications
+            };
+            
+            // Show success message
+            const successMsg = document.getElementById('notificationSettingsSaved');
+            if (successMsg) {
+                successMsg.classList.remove('hidden');
+                setTimeout(() => successMsg.classList.add('hidden'), 3000);
+            }
+            
+            // Restart reminder checking with new interval
+            if (enableNotifications) {
+                stopReminderChecking();
+                startReminderChecking();
+            } else {
+                stopReminderChecking();
+            }
+        } else {
+            throw new Error('Failed to save preferences');
+        }
+    } catch (error) {
+        console.error('Error saving notification preferences:', error);
+        alert('Error saving notification preferences. Please try again.');
     }
 }
