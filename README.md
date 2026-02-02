@@ -130,20 +130,3 @@ The application features a responsive design that works on:
 4. Push to the branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🆘 Support
-
-For support, please contact the development team or create an issue in the repository.
-
-## 🔄 Recent Updates
-
-- **Field Mutability Policy**: Implemented role-based field editing restrictions
-- **Gamification System**: Added achievement badges and progress tracking
-- **Enhanced Validation**: Improved input validation for patient data
-- **UI Improvements**: Better visual feedback and user experience enhancements
-
----
-*Built for better rural healthcare access and management*
