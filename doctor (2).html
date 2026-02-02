@@ -56,26 +56,24 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label>Patient Name</label>
-                        <input type="text" id="patientName" class="input-field" placeholder="Enter name">
+                        <input type="text" id="patientName" class="input-field" placeholder="Enter name" readonly>
                     </div>
                     <div class="form-group">
                         <label>Age</label>
-                        <input type="text" id="patientAge" class="input-field" placeholder="Age">
+                        <input type="text" id="patientAge" class="input-field" placeholder="Age" readonly>
                     </div>
                     <div class="form-group">
                         <label>Gender</label>
-                        <select id="patientGender" class="input-field">
-                            <option value="">Select</option>
-                            <option value="Male">Male</option>
-                            <option value="Female">Female</option>
-                            <option value="Other">Other</option>
-                        </select>
+                        <input type="text" id="patientGender" class="input-field" placeholder="Gender" readonly>
                     </div>
                 </div>
 
-                <button class="btn-secondary" onclick="savePatientDemographics()">
+                <button class="btn-secondary" onclick="savePatientDemographics()" disabled style="opacity: 0.5; cursor: not-allowed;">
                     Save Demographics
                 </button>
+                <div class="info-text" style="margin-top: 8px; color: #6b7280;">
+                    ℹ️ All patient details are managed by the patient. Doctors can only view this information.
+                </div>
 
                 <!-- Medical History Disclaimers -->
                 <div class="section-divider">

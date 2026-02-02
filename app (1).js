@@ -5574,3 +5574,100 @@ async function saveNotificationPreferences() {
         alert('Error saving notification preferences. Please try again.');
     }
 }
+// Update patient details (age, weight, and height only)
+async function updatePatientDetails() {
+    const patientId = getCurrentUserId();
+    if (!patientId) {
+        alert('Please log in first');
+        return;
+    }
+    
+    const age = document.getElementById('patientAge').value.trim();
+    const weight = document.getElementById('patientWeight').value.trim();
+    const height = document.getElementById('patientHeight').value.trim();
+    
+    // Validate inputs
+    if (age && (isNaN(age) || age <= 0 || age > 150)) {
+        alert('Please enter a valid age between 1-150 years');
+        return;
+    }
+    
+    if (weight && (isNaN(weight) || weight <= 0 || weight > 500)) {
+        alert('Please enter a valid weight between 1-500 kg');
+        return;
+    }
+    
+    if (height && (isNaN(height) || height < 30 || height > 300)) {
+        alert('Please enter a valid height between 30-300 cm');
+        return;
+    }
+    
+    try {
+        // Get current patient data to preserve other fields
+        const patientData = getPatientData(patientId);
+        if (!patientData) {
+            // If no cached data, fetch from server
+            await fetchPatientData(patientId);
+        }
+        
+        // Update only age, weight, and height, preserve other fields
+        const updateData = {
+            name: patientData?.name || '',
+            age: age,
+            gender: patientData?.gender || '',
+            blood_group: patientData?.blood_group || '',
+            weight: weight,
+            height: height,
+            conditions: patientData?.conditions || []
+        };
+        
+        await savePatient(patientId, updateData);
+        
+        // Show success message
+        const successMsg = document.getElementById('detailsSavedMessage');
+        if (successMsg) {
+            successMsg.textContent = '✓ Your age, weight, and height have been updated successfully!';
+            successMsg.classList.remove('hidden');
+            
+            // Hide message after 3 seconds
+            setTimeout(() => {
+                successMsg.classList.add('hidden');
+            }, 3000);
+        }
+        
+    } catch (e) {
+        console.error('Error updating patient details:', e);
+        alert('Failed to update your details. Please try again.');
+    }
+}
+
+// Modified lock function - keep age, weight, and height editable
+function lockPatientDetailsForm() {
+    const nameField = document.getElementById('patientName');
+    const genderField = document.getElementById('patientGender');
+    const bloodGroupField = document.getElementById('patientBloodGroup');
+    // Keep age, weight, and height fields editable - don't lock them
+    const saveBtn = document.getElementById('saveDetailsBtn');
+    
+    if (nameField) {
+        nameField.readOnly = true;
+        nameField.style.backgroundColor = '#f3f4f6';
+        nameField.style.cursor = 'not-allowed';
+    }
+    if (genderField) {
+        genderField.disabled = true;
+        genderField.style.backgroundColor = '#f3f4f6';
+        genderField.style.cursor = 'not-allowed';
+    }
+    if (bloodGroupField) {
+        bloodGroupField.disabled = true;
+        bloodGroupField.style.backgroundColor = '#f3f4f6';
+        bloodGroupField.style.cursor = 'not-allowed';
+    }
+    // Age, weight, and height fields remain editable - no changes here
+    
+    if (saveBtn) {
+        saveBtn.textContent = 'Update My Details';
+        saveBtn.onclick = updatePatientDetails;
+    }
+}
